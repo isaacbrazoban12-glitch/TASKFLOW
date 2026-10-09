@@ -1,0 +1,557 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'database/database_helper.dart';
+import 'models/task.dart';
+import 'notification_service.dart';
+import 'widgets/alarm_dialog.dart';
+import 'widgets/task_form_dialog.dart';
+import 'widgets/task_tile.dart';
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (!Platform.isAndroid && !Platform.isIOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+  try {
+    await NotificationService.instance.init();
+  } catch (e) {
+    debugPrint('[main] Error inicializando notificaciones: $e');
+  }
+  runApp(const TaskFlowApp());
+}
+
+class TaskFlowApp extends StatelessWidget {
+  const TaskFlowApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      debugShowCheckedModeBanner: false,
+      title: 'TaskFlow',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.indigo,
+        brightness: Brightness.light,
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.indigo,
+        brightness: Brightness.dark,
+      ),
+      themeMode: ThemeMode.system,
+      home: const HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  final DatabaseHelper _db = DatabaseHelper.instance;
+
+  List<Task> _tasks = [];
+  bool _isLoading = true;
+  bool _alarmDialogOpen = false;
+  bool _overlayDialogOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadTasks();
+    _checkPermissionsAndAlarm();
+    _setupAlarmListener();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _onAppResumed();
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    try {
+      await _checkLaunchPayload();
+    } catch (e) {
+      debugPrint('[HomePage] Error al reanudar la app: $e');
+    }
+  }
+
+  Future<void> _rescheduleAllTasks() async {
+    try {
+      final tasks = await _db.getTasks();
+      for (final task in tasks) {
+        if (task.id == null) continue;
+        if (!task.completed) {
+          final snooze = await NotificationService.instance.snoozeDeadline(task.id!);
+          if (snooze != null) {
+            debugPrint('[HomePage] Tarea ${task.id} con snooze activo, omitiendo re-agendado');
+            continue;
+          }
+          await NotificationService.instance.scheduleTask(task);
+        } else {
+          await NotificationService.instance.cancelTask(task.id!);
+        }
+      }
+      debugPrint('[HomePage] Re-agendadas ${tasks.length} tareas');
+    } catch (e) {
+      debugPrint('[HomePage] Error re-agendando tareas: $e');
+    }
+  }
+
+  Future<void> _checkPermissionsAndAlarm() async {
+    try {
+      final hasPermission = await NotificationService.instance.checkPermissions();
+      debugPrint('[HomePage] Permisos concedidos: $hasPermission');
+
+      if (!hasPermission && Platform.isAndroid) {
+        if (!mounted) return;
+        _showPermissionDialog();
+      }
+
+      await _ensureOverlayPermission();
+      await _ensureBatteryOptimization();
+      await _checkLaunchPayload();
+      await _checkInitialAlarm();
+      await _rescheduleAllTasks();
+    } catch (e) {
+      debugPrint('[HomePage] Error verificando permisos: $e');
+    }
+  }
+
+  Future<void> _ensureOverlayPermission() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      final can = await NotificationService.instance.canDrawOverlays();
+      debugPrint('[HomePage] Permiso de overlay: $can');
+      if (can) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final alreadyAsked = prefs.getBool('overlay_permission_asked') ?? false;
+      if (alreadyAsked) return;
+
+      await prefs.setBool('overlay_permission_asked', true);
+
+      if (_overlayDialogOpen || !mounted) return;
+
+      _overlayDialogOpen = true;
+      final go = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.open_in_full, size: 48, color: Colors.indigo),
+          title: const Text('Modo alarma intrusivo'),
+          content: const Text(
+            'Para que la tarea aparezca en pantalla completa interrumpiendo la app que estés usando '
+            '(Instagram, redes, juegos...), TaskFlow necesita el permiso "Mostrar sobre otras apps".\n\n'
+            'Serás llevado a los ajustes. Busca TaskFlow y activa el interruptor.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Ahora no'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Configurar ahora'),
+            ),
+          ],
+        ),
+      );
+
+      if (go == true && mounted) {
+        await NotificationService.instance.openOverlaySettings();
+      }
+      _overlayDialogOpen = false;
+    } catch (e) {
+      _overlayDialogOpen = false;
+      debugPrint('[HomePage] Error pidiendo permiso de overlay: $e');
+    }
+  }
+
+  Future<void> _ensureBatteryOptimization() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final ignoring = await NotificationService.instance.isIgnoringBatteryOptimizations();
+      debugPrint('[HomePage] Optimización de batería ignorada: $ignoring');
+      if (ignoring) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final alreadyAsked = prefs.getBool('battery_optimization_asked') ?? false;
+      if (alreadyAsked) return;
+
+      await prefs.setBool('battery_optimization_asked', true);
+
+      if (_overlayDialogOpen || !mounted) return;
+      showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.battery_alert, size: 48, color: Colors.orange),
+          title: const Text('Modo alarmas en segundo plano'),
+          content: const Text(
+            'Para que TaskFlow te despierte aunque la app esté cerrada o el teléfono optimice la batería, '
+            'desactiva la optimización de energía para TaskFlow.\n\n'
+            'Serás llevado a ajustes de batería: selecciona TaskFlow y marca "Sin restricciones".',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Ahora no'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                NotificationService.instance.openBatteryOptimizationSettings();
+              },
+              child: const Text('Configurar ahora'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('[HomePage] Error pidiendo exención de batería: $e');
+    }
+  }
+
+  Future<void> _checkLaunchPayload() async {
+    try {
+      final payload = await NotificationService.instance.consumeLaunchPayload();
+      if (payload == null) return;
+      debugPrint('[HomePage] Payload de lanzamiento nativo: $payload');
+      final data = jsonDecode(payload);
+      if (data['type'] == 'alarm') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showAlarmDialog(data);
+        });
+      }
+    } catch (e) {
+      debugPrint('[HomePage] Error leyendo payload de lanzamiento: $e');
+    }
+  }
+
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.notifications_off, size: 48, color: Colors.orange),
+        title: const Text('Permisos de notificación'),
+        content: const Text(
+          'TaskFlow necesita permisos de notificación para enviarte alarmas de tus tareas. '
+          'Sin estos permisos, las notificaciones no funcionarán.\n\n'
+          'Por favor, otorga el permiso cuando Android te lo solicite.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await NotificationService.instance.checkPermissions();
+            },
+            child: const Text('Otorgar permiso'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _checkInitialAlarm() async {
+    final details = await NotificationService.instance.getLaunchDetails();
+    if (details == null || details.notificationResponse == null) return;
+    final payload = details.notificationResponse!.payload;
+    if (payload == null) return;
+
+    debugPrint('[HomePage] App abierta desde notificación: $payload');
+
+    try {
+      final data = jsonDecode(payload);
+      if (data['type'] == 'alarm') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showAlarmDialog(data);
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _setupAlarmListener() {
+    NotificationService.instance.onAlarmTriggered = (payload) {
+      debugPrint('[HomePage] Alarma recibida: $payload');
+      try {
+        final data = jsonDecode(payload);
+        if (data['type'] == 'alarm') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showAlarmDialog(data);
+          });
+        }
+      } catch (_) {}
+    };
+
+    NotificationService.instance.onAlarmAction = (payload) {
+      debugPrint('[HomePage] Acción de alarma: $payload');
+      try {
+        final data = jsonDecode(payload);
+        if (data['type'] == 'alarm_action') {
+          final taskId = data['taskId'] as int? ?? -1;
+          final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
+          final action = data['action'] as String? ?? '';
+          if (action == 'completed') {
+            _completeTaskFromAlarm(taskId);
+          } else if (action == 'snoozed') {
+            _snoozeTaskFromAlarm(taskId, weekday);
+          }
+        }
+      } catch (_) {}
+    };
+  }
+
+  void _showAlarmDialog(Map<String, dynamic> data) {
+    final taskId = data['taskId'] as int? ?? -1;
+    final taskTitle = data['title'] as String? ?? 'Tarea';
+    final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
+
+    debugPrint('[HomePage] Mostrando dialogo de alarma: $taskTitle');
+
+    if (_alarmDialogOpen) {
+      debugPrint('[HomePage] Diálogo de alarma ya abierto, ignorando duplicado');
+      return;
+    }
+
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) {
+      debugPrint('[HomePage] Contexto nulo, reintentando...');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showAlarmDialog(data);
+      });
+      return;
+    }
+
+    _alarmDialogOpen = true;
+    showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => AlarmDialog(
+        taskId: taskId,
+        taskTitle: taskTitle,
+        weekday: weekday,
+        onCompleted: () => _completeTaskFromAlarm(taskId),
+        onSnoozed: () => _snoozeTaskFromAlarm(taskId, weekday),
+      ),
+    ).whenComplete(() async {
+      _alarmDialogOpen = false;
+      await NotificationService.instance.returnToPreviousApp();
+    });
+  }
+
+  Future<void> _completeTaskFromAlarm(int taskId) async {
+    if (taskId <= 0) return;
+    try {
+      final tasks = await _db.getTasks();
+      final task = tasks.firstWhere(
+        (t) => t.id == taskId,
+        orElse: () => throw Exception('Tarea no encontrada'),
+      );
+      await _applyCompletion(task, true);
+    } catch (e) {
+      debugPrint('[HomePage] Error completando tarea desde alarma: $e');
+    }
+  }
+
+  Future<void> _applyCompletion(Task task, bool completed) async {
+    final updated = task.copyWith(completed: completed);
+    await _db.updateTask(updated);
+
+    final stopsWhenComplete = task.stopOnComplete || !task.repeats;
+    if (completed) {
+      await NotificationService.instance.clearSnoozeDeadline(task.id!);
+      if (stopsWhenComplete) {
+        await NotificationService.instance.cancelTask(task.id!);
+      }
+    } else if (stopsWhenComplete) {
+      await NotificationService.instance.scheduleTask(updated);
+    }
+    await _loadTasks();
+  }
+
+  Future<void> _snoozeTaskFromAlarm(int taskId, int weekday) async {
+    if (taskId <= 0) return;
+    try {
+      final tasks = await _db.getTasks();
+      final task = tasks.firstWhere(
+        (t) => t.id == taskId,
+        orElse: () => throw Exception('Tarea no encontrada'),
+      );
+      await NotificationService.instance.scheduleSnooze(task, weekday);
+    } catch (e) {
+      debugPrint('[HomePage] Error posponiendo tarea desde alarma: $e');
+    }
+  }
+
+  Future<void> _loadTasks() async {
+    setState(() => _isLoading = true);
+    try {
+      final tasks = await _db.getTasks();
+      if (!mounted) return;
+      setState(() {
+        _tasks = tasks;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al cargar tareas: $e')),
+      );
+    }
+  }
+
+  Future<void> _openTaskDialog({Task? task}) async {
+    final result = await showDialog<Task>(
+      context: context,
+      builder: (_) => TaskFormDialog(task: task),
+    );
+    if (result != null) {
+      await _loadTasks();
+    }
+  }
+
+  Future<void> _toggleTask(Task task) async {
+    final newCompleted = !task.completed;
+
+    try {
+      await _applyCompletion(task, newCompleted);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al actualizar tarea: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteTask(Task task) async {
+    if (task.id == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar tarea'),
+        content: Text('¿Quieres eliminar "${task.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _db.deleteTask(task.id!);
+      await NotificationService.instance.cancelTask(task.id!);
+      await _loadTasks();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tarea eliminada')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al eliminar tarea: $e')),
+      );
+    }
+  }
+
+  Future<void> _testNotification() async {
+    debugPrint('[HomePage] Enviando notificación de prueba...');
+    await NotificationService.instance.scheduleImmediate('Prueba de alarma TaskFlow');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Notificación de prueba programada para 10 segundos'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Mis Tareas'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_active),
+            tooltip: 'Probar notificación',
+            onPressed: _testNotification,
+          ),
+          IconButton(
+            icon: const Icon(Icons.open_in_full),
+            tooltip: 'Permiso mostrar sobre apps',
+            onPressed: () async {
+              final can = await NotificationService.instance.canDrawOverlays();
+              debugPrint('[HomePage] Permiso overlay al tocar botón: $can');
+              await NotificationService.instance.openOverlaySettings();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadTasks,
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _tasks.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'Aún no tienes tareas.\nToca + para agregar una.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _tasks.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final task = _tasks[index];
+                    return TaskTile(
+                      task: task,
+                      onTap: () => _openTaskDialog(task: task),
+                      onCheckboxChanged: (_) => _toggleTask(task),
+                      onDelete: () => _deleteTask(task),
+                    );
+                  },
+                ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openTaskDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text('Nueva tarea'),
+      ),
+    );
+  }
+}

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="@drawable/alarm_gradient_bg">
+
+    <ImageView
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:src="@android:drawable/ic_lock_idle_alarm"
+        android:contentDescription="Alarma"
+        app:tint="#E94560"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+    <TextView
+        android:id="@+id/tvTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="12:00 PM"
+        android:textSize="64sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF" />
+
+    <TextView
+        android:id="@+id/tvTaskTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Tarea"
+        android:textSize="24sp"
+        android:textStyle="normal"
+        android:textColor="#B3FFFFFF"
+        android:gravity="center"
+        android:paddingHorizontal="16dp" />
+
+    <TextView
+        android:id="@+id/tvSnoozeCount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Posposiciones: 0 de 3"
+        android:textSize="16sp"
+        android:textColor="#99FFFFFF" />
+
+    <Button
+        android:id="@+id/btnComplete"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="48dp"
+        android:text="Voy a realizar la tarea"
+        android:textSize="18sp"
+        android:textColor="#FFFFFF"
+        android:drawableStart="@android:drawable/ic_menu_send"
+        android:drawablePadding="8dp"
+        android:paddingHorizontal="16dp"
+        android:backgroundTint="#4CAF50"
+        android:gravity="center" />
+
+    <Button
+        android:id="@+id/btnSnooze"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="16dp"
+        android:text="Posponer 5 min"
+        android:textSize="18sp"
+        android:textColor="#FFFFFF"
+        android:drawableStart="@android:drawable/ic_lock_idle_alarm"
+        android:drawablePadding="8dp"
+        android:paddingHorizontal="16dp"
+        android:backgroundTint="#80FFFFFF"
+        android:gravity="center" />
+
+</LinearLayout>
