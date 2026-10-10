@@ -227,3 +227,12 @@
   inspección (mismo patrón `yyyy_MM_dd`, `Locale.US`) + literales en el test.
   `flutter analyze` limpio; `flutter test` 30/30 OK.
 - Sin hallazgos nuevos.
+
+### D7. Web no se rompe (2026-10-10)
+- Contexto: `import 'dart:io'` en `main.dart` y `notification_service.dart` impedía
+  compilar a web; además `sqflite_common_ffi` (dart:ffi) tampoco compila en navegador.
+- Decisión (opción "aviso claro", no desactivar web): shims con import condicional
+  (`platform_info*.dart`, `db_ffi*.dart`), `DatabaseHelper` lanza `StateError` claro
+  en web (llega al SnackBar existente) y `HomePage` muestra aviso fijo arriba.
+  Notificaciones en web ya eran no-op (`_supported` false). Verificado con
+  `flutter build web` (compila OK). `flutter analyze` limpio; `flutter test` 30/30.

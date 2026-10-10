@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database/database_helper.dart';
+import 'db_ffi.dart';
+import 'platform_info.dart';
 import 'models/task.dart';
 import 'notification_service.dart';
 import 'widgets/alarm_dialog.dart';
@@ -14,9 +14,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!Platform.isAndroid && !Platform.isIOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+  if (!isAndroid && !isIOS) {
+    // En web es no-op (ver db_ffi_stub.dart).
+    initDatabaseFactory();
   }
   try {
     await NotificationService.instance.init();
@@ -127,7 +127,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final hasPermission = await NotificationService.instance.checkPermissions();
       debugPrint('[HomePage] Permisos concedidos: $hasPermission');
 
-      if (!hasPermission && Platform.isAndroid) {
+      if (!hasPermission && isAndroid) {
         if (!mounted) return;
         _showPermissionDialog();
       }
@@ -144,7 +144,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _ensureOverlayPermission() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
 
     try {
       final can = await NotificationService.instance.canDrawOverlays();
@@ -195,7 +195,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _ensureBatteryOptimization() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       final ignoring = await NotificationService.instance.isIgnoringBatteryOptimizations();
       debugPrint('[HomePage] Optimización de batería ignorada: $ignoring');
@@ -340,7 +340,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _showAlarmDialog(Map<String, dynamic> data) {
     // En Android la única pantalla de alarma es la nativa (AlarmActivity):
     // la notificación es solo respaldo y al tocarla solo se abre la app.
-    if (Platform.isAndroid) return;
+    if (isAndroid) return;
     final taskId = data['taskId'] as int? ?? -1;
     final taskTitle = data['title'] as String? ?? 'Tarea';
     final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
@@ -527,6 +527,58 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildWebNotice() {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: colors.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: colors.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Versión web: las alarmas no están disponibles y las tareas no se guardan.',
+              style: TextStyle(color: colors.onSecondaryContainer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_tasks.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Aún no tienes tareas.\nToca + para agregar una.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: _tasks.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final task = _tasks[index];
+        return TaskTile(
+          task: task,
+          onTap: () => _openTaskDialog(task: task),
+          onCheckboxChanged: (_) => _toggleTask(task),
+          onDelete: () => _deleteTask(task),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -553,32 +605,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _tasks.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Aún no tienes tareas.\nToca + para agregar una.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _tasks.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final task = _tasks[index];
-                    return TaskTile(
-                      task: task,
-                      onTap: () => _openTaskDialog(task: task),
-                      onCheckboxChanged: (_) => _toggleTask(task),
-                      onDelete: () => _deleteTask(task),
-                    );
-                  },
-                ),
+      body: Column(
+        children: [
+          if (isWeb) _buildWebNotice(),
+          Expanded(child: _buildBody()),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openTaskDialog(),
         icon: const Icon(Icons.add),

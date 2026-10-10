@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -8,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'models/task.dart';
+import 'platform_info.dart';
 
 class NotificationService {
   static final NotificationService instance = NotificationService._();
@@ -21,7 +21,7 @@ class NotificationService {
   static const String alarmChannelName = 'Alarmas de tareas';
   static const String alarmChannelDesc = 'Alarmas de tareas programadas';
 
-  bool get _supported => Platform.isAndroid || Platform.isIOS;
+  bool get _supported => isAndroid || isIOS;
 
   bool _permissionsGranted = false;
   bool get permissionsGranted => _permissionsGranted;
@@ -32,7 +32,7 @@ class NotificationService {
   Future<void> init() async {
     debugPrint('[NotificationService] Inicializando...');
     if (!_supported) {
-      debugPrint('[NotificationService] Plataforma no soportada: ${Platform.operatingSystem}');
+      debugPrint('[NotificationService] Plataforma no soportada: $operatingSystem');
       return;
     }
 
@@ -86,9 +86,9 @@ class NotificationService {
       return;
     }
 
-    if (Platform.isAndroid) {
+    if (isAndroid) {
       await _requestAndroidPermissions();
-    } else if (Platform.isIOS) {
+    } else if (isIOS) {
       final IOSFlutterLocalNotificationsPlugin? iosImpl =
           _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
       final result = await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
@@ -135,7 +135,7 @@ class NotificationService {
     if (!_supported) return false;
 
     try {
-      if (Platform.isAndroid) {
+      if (isAndroid) {
         final AndroidFlutterLocalNotificationsPlugin? androidImpl =
             _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
@@ -156,7 +156,7 @@ class NotificationService {
 
   Future<bool> requestPermissions() async {
     if (!_supported) return false;
-    if (Platform.isAndroid) {
+    if (isAndroid) {
       await _requestAndroidPermissions();
     }
     return _permissionsGranted;
@@ -268,7 +268,7 @@ class NotificationService {
     required bool repeats,
     required tz.TZDateTime triggerAt,
   }) async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('scheduleOverlayAlarm', {
         'alarmId': alarmId,
@@ -424,7 +424,7 @@ class NotificationService {
     if (!_supported) return;
     for (final id in alarmIdsForTask(taskId, includeSnooze: !keepSnooze)) {
       await _plugin.cancel(id);
-      if (Platform.isAndroid) {
+      if (isAndroid) {
         try {
           await _alarmChannel.invokeMethod('cancelOverlayAlarm', {
             'alarmId': id,
@@ -439,7 +439,7 @@ class NotificationService {
   /// Descarta la notificación de respaldo ya mostrada (solo Android).
   /// No toca las alarmas nativas (AlarmManager) ni otras programaciones.
   Future<void> dismissBackupNotification(int taskId, int weekday) async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _plugin.cancel(taskId * 10 + weekday);
     } catch (e) {
@@ -476,7 +476,7 @@ class NotificationService {
   }
 
   Future<String?> consumeLaunchPayload() async {
-    if (!Platform.isAndroid) return null;
+    if (!isAndroid) return null;
     try {
       return await _alarmChannel.invokeMethod<String>('consumeLaunchPayload');
     } catch (e) {
@@ -495,7 +495,7 @@ class NotificationService {
   }
 
   Future<bool> canDrawOverlays() async {
-    if (!Platform.isAndroid) return true;
+    if (!isAndroid) return true;
     try {
       return await _alarmChannel.invokeMethod<bool>('canDrawOverlays') ?? false;
     } catch (e) {
@@ -505,7 +505,7 @@ class NotificationService {
   }
 
   Future<void> openOverlaySettings() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('openOverlaySettings');
     } catch (e) {
@@ -514,7 +514,7 @@ class NotificationService {
   }
 
   Future<bool> isIgnoringBatteryOptimizations() async {
-    if (!Platform.isAndroid) return true;
+    if (!isAndroid) return true;
     try {
       return await _alarmChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? false;
     } catch (e) {
@@ -524,7 +524,7 @@ class NotificationService {
   }
 
   Future<void> openBatteryOptimizationSettings() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('openBatteryOptimizationSettings');
     } catch (e) {
@@ -533,7 +533,7 @@ class NotificationService {
   }
 
   Future<void> returnToPreviousApp() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('returnToPreviousApp');
     } catch (e) {
@@ -547,7 +547,7 @@ class NotificationService {
     required int weekday,
     required int alarmId,
   }) async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('launchAlarmActivity', {
         'taskId': taskId,

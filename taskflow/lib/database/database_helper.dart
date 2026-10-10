@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/task.dart';
+import '../platform_info.dart';
 
 class DatabaseHelper {
   DatabaseHelper._();
@@ -17,6 +18,11 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
+    if (isWeb) {
+      throw StateError(
+        'TaskFlow en web no guarda tareas: sqflite no funciona en navegador.',
+      );
+    }
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'taskflow.db');
 
