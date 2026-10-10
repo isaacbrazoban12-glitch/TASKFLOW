@@ -113,7 +113,7 @@ object ThemeHelper {
                     out.add(start to theme)
                 }
             }
-            if (out.isNotEmpty) return out.sortedBy { it.first }
+            if (out.isNotEmpty()) return out.sortedBy { it.first }
         } catch (_: Exception) {
         }
         return defaultRules

@@ -20,8 +20,9 @@ class ThemeRule {
   Map<String, dynamic> toMap() => {'start': startMinutes, 'theme': theme.name};
 
   static ThemeRule? fromMap(Map<String, dynamic> map) {
-    final start = (map['start'] as num?)?.toInt();
-    final theme = _themeByName(map['theme'] as String?);
+    final rawStart = map['start'];
+    final start = rawStart is num ? rawStart.toInt() : int.tryParse('$rawStart');
+    final theme = _themeByName(map['theme'] is String ? map['theme'] as String : null);
     if (start == null || theme == null || start < 0 || start > 1439) return null;
     return ThemeRule(startMinutes: start, theme: theme);
   }
