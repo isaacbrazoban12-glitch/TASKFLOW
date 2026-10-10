@@ -2,7 +2,7 @@
 
 ## Resumen
 
-1. Arreglado (nuevo): sonido+vibración en `AlarmActivity`, migración a canal silencioso `taskflow_backup` (resuelve BUG-05), fallback `fullScreenIntent` sin overlay, Completar/Posponer desde Kotlin sin abrir `MainActivity`, reloj en vivo + verde 5.13:1 (resuelve BUG-08); P5 verificado sin cambios (rutas ya consistentes).
+1. Arreglado (nuevo): sonido+vibración en `AlarmActivity`, migración a canal silencioso `taskflow_backup` (resuelve BUG-05), fallback `fullScreenIntent` sin overlay, Completar/Posponer desde Kotlin sin abrir `MainActivity`, reloj en vivo + verde 5.13:1 (resuelve BUG-08), crash Gson/R8 en release con ProGuard (resuelve BUG-09, verificado en Xiaomi real); P5 verificado sin cambios (rutas ya consistentes).
 2. Pendiente: 4 hallazgos de riesgo medio-bajo (canal perdido si Dart no está listo, `setIntent` ausente, ruido en logs de tests, intents pre-fix transitorios).
 3. Nivel de riesgo general: **medio** — lo funcional está cubierto y verificado en tests; el riesgo restante es no haber probado en dispositivo real (sonido, alarmas exactas, boot, ahorro agresivo) ni compilado Kotlin aquí, más la revisión de permisos en Google Play.
 4. Verificación final: `flutter analyze` sin issues y `flutter test` 35/35 (salida pegada al final).
@@ -60,6 +60,27 @@
 - Cómo reproducirlo: alarma agendada antes de D3 que dispare antes de abrir la app o reiniciar: `repeats` lee `false` y se elimina su persistencia en vez de reprogramarse.
 - Esperado vs. real: esperado = re-arme correcto; real = se autocorrige al abrir la app o reiniciar (transitorio).
 - Qué se sugiere: lectura de respaldo en prefs si falta el extra; fuera de la lista.
+
+### BUG-09 — Crash Gson/R8 en release al cancelar notificaciones
+- ID | Severidad | Estado: **BUG-09 | alta | arreglado**
+- Archivo y línea: `taskflow/android/app/build.gradle.kts` (bloque `release`, sin
+  `proguardFiles`); nuevo `taskflow/android/app/proguard-rules.pro`
+- Cómo reproducirlo: `flutter build apk --release` en un equipo con tareas guardadas
+  y abrir la app: `_rescheduleAllTasks` → `cancelTask` → `cancel` → el nativo
+  (`loadScheduledNotifications`) lanza `PlatformException(error, Missing type
+  parameter., ...)`. En debug no pasa (R8 inactivo).
+- Esperado vs. real: esperado = igual que en debug; real = R8 borra los genéricos que
+  Gson necesita, el `cancel` falla y el re-agendado aborta (alarma silenciosamente
+  perdida en producción).
+- Cómo se arregló: `proguard-rules.pro` (`Signature`, `*Annotation*`, `TypeToken` y
+  `com.dexterous.flutterlocalnotifications.**`) + `proguardFiles(...)` en release.
+  No hizo falta desactivar minify/shrink. `mapping.txt` (11 MB) confirma que R8
+  corrió; `seeds.txt` conserva el plugin.
+- Verificación en dispositivo (Xiaomi 2412DPC0AG, Android 16): APK instalado, arranque
+  limpio — re-agendado de 6 tareas OK, canal legacy eliminado, **0 `PlatformException`
+  en logcat**. Crear/editar/borrar con taps quedó pendiente: el equipo bloquea
+  inyección (`INJECT_EVENTS`, falta "USB debugging (Security settings)" de Xiaomi).
+- Nota: probar siempre en release antes de dar algo por terminado (debug no ejerce R8).
 
 ### BUG-08 — Hora congelada en la pantalla de alarma
 - ID | Severidad | Estado: **BUG-08 | baja | arreglado**
@@ -178,6 +199,8 @@ rompería); tampoco hay commits vacíos.
 - Ventana real posponer→2 min→suena a los 5 (solo cubierta con tests deterministas).
 - Comportamiento en iOS (sin dispositivo Apple) y resultado de la revisión de Play.
 - `AlarmDialog` a 150 % en pantalla pequeña.
+- Taps de crear/editar/borrar en release (Xiaomi bloquea `adb input`/`monkey`;
+  activar "USB debugging (Security settings)" o hacerlo a mano en el equipo).
 
 ## Siguiente paso recomendado
 
