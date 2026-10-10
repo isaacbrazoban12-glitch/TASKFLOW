@@ -78,8 +78,11 @@
   corrió; `seeds.txt` conserva el plugin.
 - Verificación en dispositivo (Xiaomi 2412DPC0AG, Android 16): APK instalado, arranque
   limpio — re-agendado de 6 tareas OK, canal legacy eliminado, **0 `PlatformException`
-  en logcat**. Crear/editar/borrar con taps quedó pendiente: el equipo bloquea
-  inyección (`INJECT_EVENTS`, falta "USB debugging (Security settings)" de Xiaomi).
+  en logcat**. Crear/editar/borrar lo hizo el usuario a mano en el equipo: edición
+  ("holaR8editñ") y creación ("pruebaR8", id=22, programada OK) confirmadas en
+  pantalla y log, borrado confirmado por el usuario; log posterior sin errores.
+  (Los taps automáticos por `adb` los bloquea el equipo: `INJECT_EVENTS`, falta
+  "USB debugging (Security settings)" de Xiaomi; ya activado al final.)
 - Nota: probar siempre en release antes de dar algo por terminado (debug no ejerce R8).
 
 ### BUG-08 — Hora congelada en la pantalla de alarma
@@ -199,8 +202,7 @@ rompería); tampoco hay commits vacíos.
 - Ventana real posponer→2 min→suena a los 5 (solo cubierta con tests deterministas).
 - Comportamiento en iOS (sin dispositivo Apple) y resultado de la revisión de Play.
 - `AlarmDialog` a 150 % en pantalla pequeña.
-- Taps de crear/editar/borrar en release (Xiaomi bloquea `adb input`/`monkey`;
-  activar "USB debugging (Security settings)" o hacerlo a mano en el equipo).
+- ~~Taps de crear/editar/borrar en release~~ — hecho a mano por el usuario (ver BUG-09).
 
 ## Siguiente paso recomendado
 
