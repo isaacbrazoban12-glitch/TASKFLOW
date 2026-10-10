@@ -2,14 +2,20 @@ package com.example.taskflow
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -20,6 +26,10 @@ class AlarmActivity : AppCompatActivity() {
     private var weekday: Int = 1
     private var taskTitle: String = "Tarea"
     private var alarmId: Int = 0
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
+    private val timeHandler = Handler(Looper.getMainLooper())
+    private var timeTicker: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +51,13 @@ class AlarmActivity : AppCompatActivity() {
 
         val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         tvTime.text = timeFormat.format(Date())
+        timeTicker = object : Runnable {
+            override fun run() {
+                tvTime.text = timeFormat.format(Date())
+                timeHandler.postDelayed(this, 1000)
+            }
+        }
+        timeHandler.postDelayed(timeTicker!!, 1000)
 
         tvTaskTitle.text = taskTitle
 
@@ -60,6 +77,66 @@ class AlarmActivity : AppCompatActivity() {
             incrementSnoozeCount(taskId, weekday)
             finishWithAction("snoozed")
         }
+
+        startAlarmSoundAndVibration()
+    }
+
+    private fun startAlarmSoundAndVibration() {
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            if (uri != null) {
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(this@AlarmActivity, uri)
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
+        }
+        try {
+            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500, 1000), 0))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(longArrayOf(0, 1000, 500, 1000), 0)
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmActivity", "No se pudo vibrar: $e")
+        }
+    }
+
+    private fun stopAlarmSoundAndVibration() {
+        try {
+            mediaPlayer?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            mediaPlayer?.release()
+        } catch (_: Exception) {
+        }
+        mediaPlayer = null
+        try {
+            vibrator?.cancel()
+        } catch (_: Exception) {
+        }
+        vibrator = null
+    }
+
+    override fun onDestroy() {
+        timeTicker?.let { timeHandler.removeCallbacks(it) }
+        timeTicker = null
+        stopAlarmSoundAndVibration()
+        super.onDestroy()
     }
 
     private fun setupWindowFlags() {
@@ -84,21 +161,29 @@ class AlarmActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Aplica la acción en nativo y cierra SIN abrir MainActivity.
+     * Dart aplica su parte después leyendo la acción pendiente guardada.
+     */
     private fun finishWithAction(action: String) {
-        val payload = JSONObject().apply {
-            put("type", "alarm_action")
-            put("action", action)
-            put("taskId", taskId)
-            put("title", taskTitle)
-            put("weekday", weekday)
-            put("alarmId", alarmId)
-        }.toString()
-
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra(MainActivity.EXTRA_PAYLOAD, payload)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        stopAlarmSoundAndVibration()
+        if (taskId <= 0) {
+            finish()
+            return
         }
-        startActivity(intent)
+        if (action == "snoozed") {
+            incrementSnoozeCount(taskId, weekday)
+            val triggerAt = System.currentTimeMillis() + 5L * 60 * 1000
+            val snoozeId = taskId * 10 + weekday + 100000
+            NativeAlarmHelper.scheduleAlarm(this, snoozeId, taskTitle, taskId, weekday, false, triggerAt)
+            // Marca para que Dart no toque nada aunque tarde en arrancar.
+            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .edit().putLong("flutter.snooze_deadline_$taskId", triggerAt).apply()
+            NativeAlarmHelper.storePendingAction(this, "snoozed", taskId, weekday, taskTitle, triggerAt)
+        } else {
+            NativeAlarmHelper.cancelAlarmsForTask(this, taskId)
+            NativeAlarmHelper.storePendingAction(this, "completed", taskId, weekday, taskTitle, System.currentTimeMillis())
+        }
         finish()
     }
 
@@ -116,10 +201,12 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     private fun getCurrentYearMonthDay(): String {
+        // Locale.US para que mes/día siempre sean dígitos latinos con dos
+        // cifras, igual que Dart (AlarmDialog.dateSuffix).
         val now = Date()
-        val year = SimpleDateFormat("yyyy", Locale.getDefault()).format(now)
-        val month = SimpleDateFormat("MM", Locale.getDefault()).format(now)
-        val day = SimpleDateFormat("dd", Locale.getDefault()).format(now)
+        val year = SimpleDateFormat("yyyy", Locale.US).format(now)
+        val month = SimpleDateFormat("MM", Locale.US).format(now)
+        val day = SimpleDateFormat("dd", Locale.US).format(now)
         return "${year}_${month}_${day}"
     }
 

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -8,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'models/task.dart';
+import 'platform_info.dart';
 
 class NotificationService {
   static final NotificationService instance = NotificationService._();
@@ -17,11 +17,12 @@ class NotificationService {
 
   static const MethodChannel _alarmChannel = MethodChannel('taskflow/alarm');
 
-  static const String alarmChannelId = 'taskflow_alarms';
-  static const String alarmChannelName = 'Alarmas de tareas';
-  static const String alarmChannelDesc = 'Alarmas de tareas programadas';
+  static const String alarmChannelId = 'taskflow_backup';
+  static const String alarmChannelName = 'Respaldo de alarmas';
+  static const String alarmChannelDesc = 'Respaldo silencioso de alarmas de tareas';
+  static const String legacyAlarmChannelId = 'taskflow_alarms';
 
-  bool get _supported => Platform.isAndroid || Platform.isIOS;
+  bool get _supported => isAndroid || isIOS;
 
   bool _permissionsGranted = false;
   bool get permissionsGranted => _permissionsGranted;
@@ -32,7 +33,7 @@ class NotificationService {
   Future<void> init() async {
     debugPrint('[NotificationService] Inicializando...');
     if (!_supported) {
-      debugPrint('[NotificationService] Plataforma no soportada: ${Platform.operatingSystem}');
+      debugPrint('[NotificationService] Plataforma no soportada: $operatingSystem');
       return;
     }
 
@@ -86,14 +87,27 @@ class NotificationService {
       return;
     }
 
-    if (Platform.isAndroid) {
+    if (isAndroid) {
+      await _deleteLegacyAlarmChannel();
       await _requestAndroidPermissions();
-    } else if (Platform.isIOS) {
+    } else if (isIOS) {
       final IOSFlutterLocalNotificationsPlugin? iosImpl =
           _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
       final result = await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
       _permissionsGranted = result ?? false;
       debugPrint('[NotificationService] iOS permisos: $_permissionsGranted');
+    }
+  }
+
+  /// Borra el canal viejo con sonido para que el respaldo use el nuevo silencioso.
+  Future<void> _deleteLegacyAlarmChannel() async {
+    try {
+      final AndroidFlutterLocalNotificationsPlugin? androidImpl =
+          _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await androidImpl?.deleteNotificationChannel(legacyAlarmChannelId);
+      debugPrint('[NotificationService] Canal legacy eliminado');
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR eliminando canal legacy: $e');
     }
   }
 
@@ -135,7 +149,7 @@ class NotificationService {
     if (!_supported) return false;
 
     try {
-      if (Platform.isAndroid) {
+      if (isAndroid) {
         final AndroidFlutterLocalNotificationsPlugin? androidImpl =
             _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
@@ -156,7 +170,7 @@ class NotificationService {
 
   Future<bool> requestPermissions() async {
     if (!_supported) return false;
-    if (Platform.isAndroid) {
+    if (isAndroid) {
       await _requestAndroidPermissions();
     }
     return _permissionsGranted;
@@ -191,7 +205,9 @@ class NotificationService {
       return;
     }
 
-    await cancelTask(task.id!);
+    // No borrar una posposición activa: ni su notificación ni su overlay.
+    final keepSnooze = await snoozeDeadline(task.id!) != null;
+    await cancelTask(task.id!, keepSnooze: keepSnooze);
 
     if (!task.hasValidDays) {
       debugPrint('[NotificationService] Sin días válidos, cancelando');
@@ -210,9 +226,9 @@ class NotificationService {
         channelDescription: alarmChannelDesc,
         importance: Importance.max,
         priority: Priority.high,
-        fullScreenIntent: true,
+        fullScreenIntent: await _needsFullScreenFallback(),
         category: AndroidNotificationCategory.alarm,
-        playSound: true,
+        playSound: false,
         enableVibration: true,
         vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
       );
@@ -266,7 +282,7 @@ class NotificationService {
     required bool repeats,
     required tz.TZDateTime triggerAt,
   }) async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('scheduleOverlayAlarm', {
         'alarmId': alarmId,
@@ -295,9 +311,9 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: true,
+      fullScreenIntent: await _needsFullScreenFallback(),
       category: AndroidNotificationCategory.alarm,
-      playSound: true,
+      playSound: false,
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
     );
@@ -346,11 +362,13 @@ class NotificationService {
     }
   }
 
-  Future<void> scheduleSnooze(Task task, int weekday) async {
+  Future<void> scheduleSnooze(Task task, int weekday, {int? triggerAtMillis}) async {
     if (!_supported || task.id == null) return;
 
     final snoozeId = task.id! * 10 + weekday + 100000;
-    final snoozeDate = tz.TZDateTime.now(tz.local).add(const Duration(minutes: 5));
+    final snoozeDate = triggerAtMillis != null
+        ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.local, triggerAtMillis)
+        : tz.TZDateTime.now(tz.local).add(const Duration(minutes: 5));
 
     debugPrint('[NotificationService] Posponiendo tarea ${task.title} a $snoozeDate');
 
@@ -360,9 +378,9 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: true,
+      fullScreenIntent: await _needsFullScreenFallback(),
       category: AndroidNotificationCategory.alarm,
-      playSound: true,
+      playSound: false,
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
     );
@@ -401,28 +419,54 @@ class NotificationService {
         repeats: false,
         triggerAt: snoozeDate,
       );
+      await setSnoozeDeadline(task.id!, untilMillis: triggerAtMillis);
     } catch (e) {
       debugPrint('[NotificationService] ERROR programando posposición: $e');
     }
   }
 
-  Future<void> cancelTask(int taskId) async {
-    if (!_supported) return;
+  /// IDs de notificación/overlay de la tarea. Con [includeSnooze] false se
+  /// excluyen los de posposición (`+100000`) para no borrar un snooze activo.
+  static List<int> alarmIdsForTask(int taskId, {bool includeSnooze = true}) {
+    final ids = <int>[];
     for (int weekday = 1; weekday <= 7; weekday++) {
-      await _plugin.cancel(taskId * 10 + weekday);
-      await _plugin.cancel(taskId * 10 + weekday + 100000);
-      if (Platform.isAndroid) {
+      ids.add(taskId * 10 + weekday);
+      if (includeSnooze) ids.add(taskId * 10 + weekday + 100000);
+    }
+    return ids;
+  }
+
+  Future<void> cancelTask(int taskId, {bool keepSnooze = false}) async {
+    if (!_supported) return;
+    for (final id in alarmIdsForTask(taskId, includeSnooze: !keepSnooze)) {
+      await _plugin.cancel(id);
+      if (isAndroid) {
         try {
           await _alarmChannel.invokeMethod('cancelOverlayAlarm', {
-            'alarmId': taskId * 10 + weekday,
-          });
-          await _alarmChannel.invokeMethod('cancelOverlayAlarm', {
-            'alarmId': taskId * 10 + weekday + 100000,
+            'alarmId': id,
           });
         } catch (e) {
           debugPrint('[NotificationService] ERROR cancelando overlay: $e');
         }
       }
+    }
+  }
+
+  /// En Android sin permiso de overlay, la notificación usa fullScreenIntent
+  /// como respaldo para mostrar la alarma (el diálogo lo muestra Dart).
+  Future<bool> _needsFullScreenFallback() async {
+    if (!isAndroid) return false;
+    return !(await canDrawOverlays());
+  }
+
+  /// Descarta la notificación de respaldo ya mostrada (solo Android).
+  /// No toca las alarmas nativas (AlarmManager) ni otras programaciones.
+  Future<void> dismissBackupNotification(int taskId, int weekday) async {
+    if (!isAndroid) return;
+    try {
+      await _plugin.cancel(taskId * 10 + weekday);
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR descartando respaldo: $e');
     }
   }
 
@@ -433,16 +477,44 @@ class NotificationService {
     final ms = prefs.getInt(_snoozeKey(taskId));
     if (ms == null) return null;
     final deadline = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-    if (deadline.isBefore(DateTime.now().toUtc())) return null;
+    if (deadline.isBefore(DateTime.now().toUtc())) {
+      // La posposición ya sonó: limpiar la marca al leerla.
+      await prefs.remove(_snoozeKey(taskId));
+      return null;
+    }
     return deadline;
   }
 
-  Future<void> setSnoozeDeadline(int taskId) async {
+  Future<void> setSnoozeDeadline(int taskId, {int? untilMillis}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(
       _snoozeKey(taskId),
-      DateTime.now().toUtc().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+      untilMillis ?? DateTime.now().toUtc().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
     );
+  }
+
+  /// Un snooze pendiente aún no sonó si su trigger está en futuro.
+  static bool isSnoozeTriggerFresh(int triggerAtMillis, int nowMillis) {
+    return triggerAtMillis > nowMillis;
+  }
+
+  /// Acciones aplicadas en nativo (AlarmActivity) pendientes de aplicar en Dart.
+  /// Al leerlas se borran para aplicarlas una sola vez.
+  Future<List<Map<String, dynamic>>> consumePendingAlarmActions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('taskflow_pending_actions');
+      if (raw == null) return [];
+      await prefs.remove('taskflow_pending_actions');
+      final list = jsonDecode(raw) as List;
+      return list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR leyendo acciones pendientes: $e');
+      return [];
+    }
   }
 
   Future<void> clearSnoozeDeadline(int taskId) async {
@@ -451,7 +523,7 @@ class NotificationService {
   }
 
   Future<String?> consumeLaunchPayload() async {
-    if (!Platform.isAndroid) return null;
+    if (!isAndroid) return null;
     try {
       return await _alarmChannel.invokeMethod<String>('consumeLaunchPayload');
     } catch (e) {
@@ -470,7 +542,7 @@ class NotificationService {
   }
 
   Future<bool> canDrawOverlays() async {
-    if (!Platform.isAndroid) return true;
+    if (!isAndroid) return true;
     try {
       return await _alarmChannel.invokeMethod<bool>('canDrawOverlays') ?? false;
     } catch (e) {
@@ -480,7 +552,7 @@ class NotificationService {
   }
 
   Future<void> openOverlaySettings() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('openOverlaySettings');
     } catch (e) {
@@ -489,7 +561,7 @@ class NotificationService {
   }
 
   Future<bool> isIgnoringBatteryOptimizations() async {
-    if (!Platform.isAndroid) return true;
+    if (!isAndroid) return true;
     try {
       return await _alarmChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? false;
     } catch (e) {
@@ -499,7 +571,7 @@ class NotificationService {
   }
 
   Future<void> openBatteryOptimizationSettings() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('openBatteryOptimizationSettings');
     } catch (e) {
@@ -508,31 +580,11 @@ class NotificationService {
   }
 
   Future<void> returnToPreviousApp() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       await _alarmChannel.invokeMethod('returnToPreviousApp');
     } catch (e) {
       debugPrint('[NotificationService] ERROR volviendo a la app anterior: $e');
-    }
-  }
-
-  Future<void> launchAlarmActivity({
-    required int taskId,
-    required String title,
-    required int weekday,
-    required int alarmId,
-  }) async {
-    if (!Platform.isAndroid) return;
-    try {
-      await _alarmChannel.invokeMethod('launchAlarmActivity', {
-        'taskId': taskId,
-        'title': title,
-        'weekday': weekday,
-        'alarmId': alarmId,
-      });
-      debugPrint('[NotificationService] AlarmActivity lanzada para tarea $taskId');
-    } catch (e) {
-      debugPrint('[NotificationService] ERROR lanzando AlarmActivity: $e');
     }
   }
 

@@ -27,6 +27,9 @@ class TaskTile extends StatelessWidget {
       hour: task.hour,
       minute: task.minute,
     ).format(context);
+    // Estado efectivo: una repetitiva sin stop marcada solo muestra
+    // completada hasta que llega la siguiente ocurrencia.
+    final done = task.isEffectivelyCompleted(DateTime.now());
 
     return Card(
       child: ListTile(
@@ -34,7 +37,7 @@ class TaskTile extends StatelessWidget {
         title: Text(
           task.title,
           style: TextStyle(
-            decoration: task.completed ? TextDecoration.lineThrough : null,
+            decoration: done ? TextDecoration.lineThrough : null,
           ),
         ),
         subtitle: Text('${_formatDays(task.weekdays)} · $time'),
@@ -42,7 +45,7 @@ class TaskTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Checkbox(
-              value: task.completed,
+              value: done,
               onChanged: onCheckboxChanged,
             ),
             IconButton(

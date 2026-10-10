@@ -1,5 +1,5 @@
 name: taskflow
-description: "A new Flutter project."
+description: "Alarmas de tareas semanales (Flutter + Android nativo)."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -51,6 +51,26 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  image_path: "../icon.png"
+  min_sdk_android: 21
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "../icon.png"
+    background_color: "#0B1533"
+    theme_color: "#0B1533"
+  windows:
+    generate: true
+    image_path: "../icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "../icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

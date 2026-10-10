@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 
@@ -15,6 +16,8 @@ object NativeAlarmHelper {
 
     private const val PREFS_NAME = "taskflow_overlay_alarms"
     private const val KEY_PREFIX = "alarm_"
+    private const val FLUTTER_PREFS = "FlutterSharedPreferences"
+    private const val PENDING_KEY = "flutter.taskflow_pending_actions"
 
     fun scheduleAlarm(
         context: Context,
@@ -30,6 +33,8 @@ object NativeAlarmHelper {
             putExtra(MainActivity.EXTRA_TITLE, title)
             putExtra(MainActivity.EXTRA_TASK_ID, taskId)
             putExtra(MainActivity.EXTRA_WEEKDAY, weekday)
+            putExtra(MainActivity.EXTRA_REPEATS, repeats)
+            putExtra(MainActivity.EXTRA_TRIGGER_AT, triggerAtMillis)
         }
         val pending = PendingIntent.getBroadcast(
             context,
@@ -172,7 +177,99 @@ object NativeAlarmHelper {
             .apply()
     }
 
-    private fun removeAlarm(context: Context, alarmId: Int) {
+    /**
+     * Re-arme tras el disparo: setAlarmClock es one-shot.
+     * Si [repeats] es true, agenda la siguiente ocurrencia (+7 días a la misma
+     * hora) vía [scheduleAlarm] —que actualiza el valor persistido— y devuelve
+     * el próximo trigger. Si es false, elimina la alarma persistida y devuelve null.
+     */
+    fun rescheduleNextWeek(
+        context: Context,
+        alarmId: Int,
+        title: String,
+        taskId: Int,
+        weekday: Int,
+        repeats: Boolean,
+        lastTriggerAtMillis: Long
+    ): Long? {
+        if (!repeats) {
+            removeAlarm(context, alarmId)
+            return null
+        }
+        var next = lastTriggerAtMillis + 7L * 24 * 3600 * 1000
+        val now = System.currentTimeMillis()
+        while (next <= now) {
+            next += 7L * 24 * 3600 * 1000
+        }
+        scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, next)
+        return next
+    }
+
+    /** Cancela todas las alarmas nativas persistidas de la tarea (incluye snooze). */
+    fun cancelAlarmsForTask(context: Context, taskId: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        for ((key, value) in prefs.all) {
+            if (!key.startsWith(KEY_PREFIX)) continue
+            val jsonStr = value as? String ?: continue
+            try {
+                val json = JSONObject(jsonStr)
+                if (json.getInt("taskId") != taskId) continue
+                val alarmId = json.getInt("alarmId")
+                val intent = Intent(context, AlarmLaunchReceiver::class.java)
+                val pending = PendingIntent.getBroadcast(
+                    context,
+                    alarmId,
+                    intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                if (pending != null) {
+                    alarmManager.cancel(pending)
+                    pending.cancel()
+                }
+                editor.remove(key)
+                Log.d("NativeAlarmHelper", "Cancelada alarma $alarmId de tarea $taskId")
+            } catch (e: Exception) {
+                Log.e("NativeAlarmHelper", "Error cancelando alarma de tarea $taskId: $e")
+            }
+        }
+        editor.apply()
+    }
+
+    /**
+     * Guarda una acción (completed/snoozed) para que Dart la aplique después.
+     * Mismo store que el plugin de Flutter (`flutter.` = misma entrada que en Dart).
+     */
+    fun storePendingAction(
+        context: Context,
+        action: String,
+        taskId: Int,
+        weekday: Int,
+        title: String,
+        triggerAtMillis: Long
+    ) {
+        try {
+            val prefs = context.getSharedPreferences(FLUTTER_PREFS, Context.MODE_PRIVATE)
+            val arr = try {
+                JSONArray(prefs.getString(PENDING_KEY, "[]"))
+            } catch (_: Exception) {
+                JSONArray()
+            }
+            arr.put(JSONObject().apply {
+                put("action", action)
+                put("taskId", taskId)
+                put("weekday", weekday)
+                put("title", title)
+                put("triggerAt", triggerAtMillis)
+            })
+            prefs.edit().putString(PENDING_KEY, arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("NativeAlarmHelper", "Error guardando acción pendiente: $e")
+        }
+    }
+
+    fun removeAlarm(context: Context, alarmId: Int) {
         if (alarmId < 0) return
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()

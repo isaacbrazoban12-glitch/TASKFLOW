@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,14 +21,42 @@ class AlarmDialog extends StatefulWidget {
 
   static const int maxSnoozeCount = 3;
 
+  /// Sufijo de fecha con dos dígitos, igual que Kotlin
+  /// (`SimpleDateFormat yyyy/MM/dd` con `Locale.US`).
+  static String dateSuffix(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}_${month}_$day';
+  }
+
+  /// Clave del contador, idéntica en Dart y Kotlin (el plugin antepone
+  /// `flutter.` en Android; es la misma entrada).
+  static String snoozeKey(int taskId, int weekday, DateTime date) {
+    return 'alarm_dismiss_${taskId}_${weekday}_${dateSuffix(date)}';
+  }
+
   static String _prefsKey(int taskId, int weekday) {
-    final now = DateTime.now();
-    return 'alarm_dismiss_${taskId}_${weekday}_${now.year}_${now.month}_${now.day}';
+    return snoozeKey(taskId, weekday, DateTime.now());
   }
 
   static Future<int> getSnoozeCount(int taskId, int weekday) async {
     final prefs = await SharedPreferences.getInstance();
+    // La caché Dart puede estar desactualizada frente a escrituras de Kotlin.
+    await prefs.reload();
     return prefs.getInt(_prefsKey(taskId, weekday)) ?? 0;
+  }
+
+  /// Borra contadores de días anteriores para que no se acumulen.
+  static Future<void> clearStaleSnoozeCounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final todaySuffix = dateSuffix(DateTime.now());
+    final stale = prefs.getKeys().where(
+          (key) => key.startsWith('alarm_dismiss_') && !key.endsWith('_$todaySuffix'),
+        );
+    for (final key in stale) {
+      await prefs.remove(key);
+    }
   }
 
   static Future<void> incrementSnoozeCount(int taskId, int weekday) async {
@@ -43,12 +73,22 @@ class AlarmDialog extends StatefulWidget {
 class _AlarmDialogState extends State<AlarmDialog> {
   int _snoozeCount = 0;
   late String _currentTime;
+  Timer? _clock;
 
   @override
   void initState() {
     super.initState();
     _loadSnoozeCount();
     _updateTime();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(_updateTime);
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSnoozeCount() async {
@@ -141,7 +181,8 @@ class _AlarmDialogState extends State<AlarmDialog> {
                       style: TextStyle(fontSize: 18),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4CAF50),
+                      // Verde oscuro: blanco encima da 5.13:1 (WCAG AA).
+                      backgroundColor: const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),

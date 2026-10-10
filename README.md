@@ -46,17 +46,17 @@ La app declara `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM` / `USE_EXACT_ALARM`,
 `SYSTEM_ALERT_WINDOW` y `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
 Tres de ellos (`SYSTEM_ALERT_WINDOW`, `USE_EXACT_ALARM`,
 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) están bajo escrutinio especial en
-Google Play: ver el análisis en `../BUG_REPORT.md` (no se quitan porque las
+Google Play: ver el análisis en `BUG_REPORT.md` (no se quitan porque las
 alarmas exactas y la pantalla sobre otras apps son el núcleo de la app).
 
 ## Estructura
 
-- `lib/main.dart`: UI principal y lógica de completado por ocurrencia.
-- `lib/models/task.dart`: modelo (`completed` = detenida, `completedAt` = ocurrencia).
-- `lib/database/database_helper.dart`: sqflite (v2) + `platform_info.dart`/`db_ffi.dart`
+- `taskflow/lib/main.dart`: UI principal y lógica de completado por ocurrencia.
+- `taskflow/lib/models/task.dart`: modelo (`completed` = detenida, `completedAt` = ocurrencia).
+- `taskflow/lib/database/database_helper.dart`: sqflite (v2) + `platform_info.dart`/`db_ffi.dart`
   para compilar en web.
-- `lib/notification_service.dart`: notificaciones y puente al canal nativo.
-- `android/.../kotlin/com/example/taskflow/`: `MainActivity`, `AlarmActivity`,
+- `taskflow/lib/notification_service.dart`: notificaciones y puente al canal nativo.
+- `taskflow/android/.../kotlin/com/example/taskflow/`: `MainActivity`, `AlarmActivity`,
   `AlarmLaunchReceiver`, `AlarmBootReceiver`, `NativeAlarmHelper`.
-- `test/`: unitarios (`task_test`, `snooze_test`, `snooze_key_test`) y widgets con
+- `taskflow/test/`: unitarios (`task_test`, `snooze_test`, `snooze_key_test`) y widgets con
   BD mockeada (`widget_test.dart`).

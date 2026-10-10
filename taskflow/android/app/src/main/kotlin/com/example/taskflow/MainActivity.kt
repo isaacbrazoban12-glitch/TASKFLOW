@@ -60,14 +60,6 @@ class MainActivity : FlutterActivity() {
                         finishAndRemoveTask()
                         result.success(true)
                     }
-                    "launchAlarmActivity" -> {
-                        val taskId = call.argument<Int>("taskId") ?: -1
-                        val title = call.argument<String>("title") ?: "Tarea"
-                        val weekday = call.argument<Int>("weekday") ?: 1
-                        val alarmId = call.argument<Int>("alarmId") ?: 0
-                        launchAlarmActivity(taskId, title, weekday, alarmId)
-                        result.success(true)
-                    }
                     else -> result.notImplemented()
                 }
             }
@@ -77,22 +69,12 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         val payload = intent.getStringExtra(EXTRA_PAYLOAD)
         if (payload != null) {
-            launchPayload = payload
+            // Entrega única por el canal: no guardar en launchPayload para evitar
+            // que _checkLaunchPayload lo aplique una segunda vez al reanudar.
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
                 MethodChannel(messenger, CHANNEL).invokeMethod("onAlarmAction", payload)
             }
         }
-    }
-
-    private fun launchAlarmActivity(taskId: Int, title: String, weekday: Int, alarmId: Int) {
-        val intent = Intent(this, AlarmActivity::class.java).apply {
-            putExtra(EXTRA_ALARM_ID, alarmId)
-            putExtra(EXTRA_TITLE, title)
-            putExtra(EXTRA_TASK_ID, taskId)
-            putExtra(EXTRA_WEEKDAY, weekday)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
     }
 
     companion object {
@@ -102,6 +84,8 @@ class MainActivity : FlutterActivity() {
         const val EXTRA_TASK_ID = "alarm_task_id"
         const val EXTRA_WEEKDAY = "alarm_weekday"
         const val EXTRA_PAYLOAD = "alarm_payload"
+        const val EXTRA_REPEATS = "alarm_repeats"
+        const val EXTRA_TRIGGER_AT = "alarm_trigger_at"
 
         var launchPayload: String? = null
             private set

@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database/database_helper.dart';
+import 'db_ffi.dart';
+import 'platform_info.dart';
 import 'models/task.dart';
 import 'notification_service.dart';
 import 'widgets/alarm_dialog.dart';
@@ -14,9 +14,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!Platform.isAndroid && !Platform.isIOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+  if (!isAndroid && !isIOS) {
+    // En web es no-op (ver db_ffi_stub.dart).
+    initDatabaseFactory();
   }
   try {
     await NotificationService.instance.init();
@@ -65,6 +65,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _alarmDialogOpen = false;
   bool _overlayDialogOpen = false;
+  bool _overlayGranted = true;
 
   @override
   void initState() {
@@ -90,7 +91,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _onAppResumed() async {
     try {
+      _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await _checkLaunchPayload();
+      await _applyPendingAlarmActions();
     } catch (e) {
       debugPrint('[HomePage] Error al reanudar la app: $e');
     }
@@ -101,15 +104,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final tasks = await _db.getTasks();
       for (final task in tasks) {
         if (task.id == null) continue;
-        if (!task.completed) {
+        // Solo las detenidas (no se repiten o con stopOnComplete) pierden sus
+        // alarmas. Una repetitiva sin stop completada solo marcó la ocurrencia
+        // (completedAt) y sus futuras alarmas siguen activas.
+        if (task.isStopped) {
+          await NotificationService.instance.cancelTask(task.id!);
+        } else {
+          // Con posposición activa no se toca nada: ni re-agendar ni cancelar.
           final snooze = await NotificationService.instance.snoozeDeadline(task.id!);
           if (snooze != null) {
             debugPrint('[HomePage] Tarea ${task.id} con snooze activo, omitiendo re-agendado');
             continue;
           }
           await NotificationService.instance.scheduleTask(task);
-        } else {
-          await NotificationService.instance.cancelTask(task.id!);
         }
       }
       debugPrint('[HomePage] Re-agendadas ${tasks.length} tareas');
@@ -123,14 +130,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final hasPermission = await NotificationService.instance.checkPermissions();
       debugPrint('[HomePage] Permisos concedidos: $hasPermission');
 
-      if (!hasPermission && Platform.isAndroid) {
+      if (!hasPermission && isAndroid) {
         if (!mounted) return;
         _showPermissionDialog();
       }
 
       await _ensureOverlayPermission();
       await _ensureBatteryOptimization();
+      _overlayGranted = await NotificationService.instance.canDrawOverlays();
+      await AlarmDialog.clearStaleSnoozeCounts();
       await _checkLaunchPayload();
+      await _applyPendingAlarmActions();
       await _checkInitialAlarm();
       await _rescheduleAllTasks();
     } catch (e) {
@@ -139,7 +149,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _ensureOverlayPermission() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
 
     try {
       final can = await NotificationService.instance.canDrawOverlays();
@@ -190,7 +200,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _ensureBatteryOptimization() async {
-    if (!Platform.isAndroid) return;
+    if (!isAndroid) return;
     try {
       final ignoring = await NotificationService.instance.isIgnoringBatteryOptimizations();
       debugPrint('[HomePage] Optimización de batería ignorada: $ignoring');
@@ -243,6 +253,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _showAlarmDialog(data);
         });
+      } else if (data['type'] == 'alarm_action') {
+        final taskId = data['taskId'] as int? ?? -1;
+        final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
+        final action = data['action'] as String? ?? '';
+        if (action == 'completed') {
+          await _completeTaskFromAlarm(taskId, weekday);
+        } else if (action == 'snoozed') {
+          await _snoozeTaskFromAlarm(taskId, weekday);
+        }
       }
     } catch (e) {
       debugPrint('[HomePage] Error leyendo payload de lanzamiento: $e');
@@ -314,7 +333,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
           final action = data['action'] as String? ?? '';
           if (action == 'completed') {
-            _completeTaskFromAlarm(taskId);
+            _completeTaskFromAlarm(taskId, weekday);
           } else if (action == 'snoozed') {
             _snoozeTaskFromAlarm(taskId, weekday);
           }
@@ -324,6 +343,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _showAlarmDialog(Map<String, dynamic> data) {
+    // En Android con overlay la única pantalla de alarma es la nativa
+    // (AlarmActivity). Sin overlay, el diálogo es el respaldo (la notificación
+    // usa fullScreenIntent y al tocarla solo se abre la app).
+    if (isAndroid && _overlayGranted) return;
     final taskId = data['taskId'] as int? ?? -1;
     final taskTitle = data['title'] as String? ?? 'Tarea';
     final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
@@ -352,7 +375,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         taskId: taskId,
         taskTitle: taskTitle,
         weekday: weekday,
-        onCompleted: () => _completeTaskFromAlarm(taskId),
+        onCompleted: () => _completeTaskFromAlarm(taskId, weekday),
         onSnoozed: () => _snoozeTaskFromAlarm(taskId, weekday),
       ),
     ).whenComplete(() async {
@@ -361,9 +384,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _completeTaskFromAlarm(int taskId) async {
+  Future<void> _completeTaskFromAlarm(int taskId, int weekday) async {
     if (taskId <= 0) return;
     try {
+      await NotificationService.instance.dismissBackupNotification(taskId, weekday);
       final tasks = await _db.getTasks();
       final task = tasks.firstWhere(
         (t) => t.id == taskId,
@@ -376,32 +400,73 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _applyCompletion(Task task, bool completed) async {
-    final updated = task.copyWith(completed: completed);
+    // Repetitiva sin stopOnComplete: completar solo marca la ocurrencia actual
+    // (fecha) y las alarmas futuras siguen activas.
+    if (completed && !task.stopsOnComplete) {
+      final updated = task.copyWith(
+        completed: false,
+        completedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      await _db.updateTask(updated);
+      await NotificationService.instance.clearSnoozeDeadline(task.id!);
+      await NotificationService.instance.scheduleTask(updated);
+      await _loadTasks();
+      return;
+    }
+
+    final updated = completed
+        ? task.copyWith(completed: true, clearCompletedAt: true)
+        : task.copyWith(completed: false, clearCompletedAt: true);
     await _db.updateTask(updated);
 
-    final stopsWhenComplete = task.stopOnComplete || !task.repeats;
     if (completed) {
       await NotificationService.instance.clearSnoozeDeadline(task.id!);
-      if (stopsWhenComplete) {
-        await NotificationService.instance.cancelTask(task.id!);
-      }
-    } else if (stopsWhenComplete) {
+      await NotificationService.instance.cancelTask(task.id!);
+    } else {
       await NotificationService.instance.scheduleTask(updated);
     }
     await _loadTasks();
   }
 
-  Future<void> _snoozeTaskFromAlarm(int taskId, int weekday) async {
+  Future<void> _snoozeTaskFromAlarm(int taskId, int weekday, {int? triggerAtMillis}) async {
     if (taskId <= 0) return;
     try {
+      await NotificationService.instance.dismissBackupNotification(taskId, weekday);
       final tasks = await _db.getTasks();
       final task = tasks.firstWhere(
         (t) => t.id == taskId,
         orElse: () => throw Exception('Tarea no encontrada'),
       );
-      await NotificationService.instance.scheduleSnooze(task, weekday);
+      await NotificationService.instance.scheduleSnooze(task, weekday, triggerAtMillis: triggerAtMillis);
     } catch (e) {
       debugPrint('[HomePage] Error posponiendo tarea desde alarma: $e');
+    }
+  }
+
+  /// Aplica en Dart las acciones que AlarmActivity ya aplicó en nativo.
+  /// Un snooze vencido se ignora (ya sonó; la marca se autolimpia al leerla).
+  Future<void> _applyPendingAlarmActions() async {
+    try {
+      final pending = await NotificationService.instance.consumePendingAlarmActions();
+      if (pending.isEmpty) return;
+      debugPrint('[HomePage] Acciones pendientes nativas: ${pending.length}');
+      for (final item in pending) {
+        final action = item['action'] as String? ?? '';
+        final taskId = (item['taskId'] as num?)?.toInt() ?? -1;
+        final weekday = (item['weekday'] as num?)?.toInt() ?? DateTime.now().weekday;
+        final triggerAt = (item['triggerAt'] as num?)?.toInt() ?? 0;
+        if (taskId <= 0) continue;
+        if (action == 'completed') {
+          await _completeTaskFromAlarm(taskId, weekday);
+        } else if (action == 'snoozed') {
+          if (NotificationService.isSnoozeTriggerFresh(
+              triggerAt, DateTime.now().millisecondsSinceEpoch)) {
+            await _snoozeTaskFromAlarm(taskId, weekday, triggerAtMillis: triggerAt);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[HomePage] Error aplicando acciones pendientes: $e');
     }
   }
 
@@ -434,7 +499,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTask(Task task) async {
-    final newCompleted = !task.completed;
+    final newCompleted = !task.isEffectivelyCompleted(DateTime.now());
 
     try {
       await _applyCompletion(task, newCompleted);
@@ -495,6 +560,66 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /// Aviso en plataformas sin alarmas del sistema (web y escritorio).
+  /// En móvil no hay nada que avisar: lista vacía.
+  List<Widget> _buildPlatformNotice() {
+    if (isAndroid || isIOS) return const [];
+    final text = isWeb
+        ? 'Versión web: las alarmas no están disponibles y las tareas no se guardan.'
+        : 'Versión de escritorio: no hay alarmas del sistema; la app funciona como lista de tareas.';
+    final colors = Theme.of(context).colorScheme;
+    return [
+      Container(
+        width: double.infinity,
+        color: colors.secondaryContainer,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: colors.onSecondaryContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(color: colors.onSecondaryContainer),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_tasks.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Aún no tienes tareas.\nToca + para agregar una.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: _tasks.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final task = _tasks[index];
+        return TaskTile(
+          task: task,
+          onTap: () => _openTaskDialog(task: task),
+          onCheckboxChanged: (_) => _toggleTask(task),
+          onDelete: () => _deleteTask(task),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -521,32 +646,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _tasks.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Aún no tienes tareas.\nToca + para agregar una.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _tasks.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final task = _tasks[index];
-                    return TaskTile(
-                      task: task,
-                      onTap: () => _openTaskDialog(task: task),
-                      onCheckboxChanged: (_) => _toggleTask(task),
-                      onDelete: () => _deleteTask(task),
-                    );
-                  },
-                ),
+      body: Column(
+        children: [
+          ..._buildPlatformNotice(),
+          Expanded(child: _buildBody()),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openTaskDialog(),
         icon: const Icon(Icons.add),
