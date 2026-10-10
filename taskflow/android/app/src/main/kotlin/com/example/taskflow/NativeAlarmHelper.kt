@@ -30,6 +30,8 @@ object NativeAlarmHelper {
             putExtra(MainActivity.EXTRA_TITLE, title)
             putExtra(MainActivity.EXTRA_TASK_ID, taskId)
             putExtra(MainActivity.EXTRA_WEEKDAY, weekday)
+            putExtra(MainActivity.EXTRA_REPEATS, repeats)
+            putExtra(MainActivity.EXTRA_TRIGGER_AT, triggerAtMillis)
         }
         val pending = PendingIntent.getBroadcast(
             context,
@@ -172,7 +174,35 @@ object NativeAlarmHelper {
             .apply()
     }
 
-    private fun removeAlarm(context: Context, alarmId: Int) {
+    /**
+     * Re-arme tras el disparo: setAlarmClock es one-shot.
+     * Si [repeats] es true, agenda la siguiente ocurrencia (+7 días a la misma
+     * hora) vía [scheduleAlarm] —que actualiza el valor persistido— y devuelve
+     * el próximo trigger. Si es false, elimina la alarma persistida y devuelve null.
+     */
+    fun rescheduleNextWeek(
+        context: Context,
+        alarmId: Int,
+        title: String,
+        taskId: Int,
+        weekday: Int,
+        repeats: Boolean,
+        lastTriggerAtMillis: Long
+    ): Long? {
+        if (!repeats) {
+            removeAlarm(context, alarmId)
+            return null
+        }
+        var next = lastTriggerAtMillis + 7L * 24 * 3600 * 1000
+        val now = System.currentTimeMillis()
+        while (next <= now) {
+            next += 7L * 24 * 3600 * 1000
+        }
+        scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, next)
+        return next
+    }
+
+    fun removeAlarm(context: Context, alarmId: Int) {
         if (alarmId < 0) return
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()

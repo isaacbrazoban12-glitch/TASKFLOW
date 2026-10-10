@@ -74,6 +74,19 @@
 - Evidencia: lectura de `AlarmLaunchReceiver.kt` (sin re-agendado) y grep de
   `_rescheduleAllTasks` (solo se llama al iniciar la app).
 - Severidad: media/alta. No se arregla (fuera de la lista).
+- Nota 2026-10-10: pasó a la lista del usuario y se arregla en D3; se deja constancia.
+
+### 7. PendingIntents creados antes del fix no llevan `repeats`/`triggerAt` (transitorio)
+- Fecha: 2026-10-10
+- Archivo: `taskflow/android/app/src/main/kotlin/com/example/taskflow/AlarmLaunchReceiver.kt`
+- Hallazgo: los extras `EXTRA_REPEATS`/`EXTRA_TRIGGER_AT` solo existen en intents
+  creados tras D3. Si una alarma repetitiva agendada ANTES del update dispara ANTES de
+  que la app se abra (y re-arme vía `_rescheduleAllTasks` o boot), el receiver lee
+  `repeats=false` por defecto y eliminaría su persistencia en vez de reprogramarla.
+  Se autocorrige en cuanto la app se abre o el dispositivo reinicia.
+- Evidencia: inspección de código (defaults `getBooleanExtra(..., false)`).
+- Severidad: baja/transitoria. No se arregla (requeriría lectura de respaldo en prefs;
+  fuera de la lista).
 
 ## Decisiones tomadas
 
@@ -116,3 +129,29 @@
     (`EXTRA_PAYLOAD` solo lleva `alarm_action`); queda como fallback defensivo.
 - Consecuencias conocidas: ver hallazgos 5 (canal existente con sonido) y 6 (repetitiva
   nativa sin re-agendado al disparar).
+
+### D3. Re-arme semanal nativo (2026-10-10) — resuelve hallazgo 6
+- Contexto: `setAlarmClock` es one-shot y el receiver no re-agendaba: las repetitivas
+  morían hasta abrir la app.
+- Cambios (solo Kotlin, Dart intacto):
+  - `MainActivity`: nuevos extras `EXTRA_REPEATS` / `EXTRA_TRIGGER_AT`.
+  - `NativeAlarmHelper.scheduleAlarm`: los propaga al `PendingIntent` (el lookup de
+    `cancelAlarm` no se ve afectado: `filterEquals` ignora extras).
+  - Nuevo `rescheduleNextWeek(...)`: si `repeats==false` elimina el persistido
+    (`removeAlarm`, ahora pública) y devuelve null; si true agenda `triggerAt + 7d`
+    vía `scheduleAlarm` (que re-persiste el nuevo `triggerAt`) con guarda `while (next <= now)`
+    para entregas tardías, y devuelve el próximo trigger.
+  - `AlarmLaunchReceiver.onReceive`: re-arme ANTES de lanzar `AlarmActivity` (aunque el
+    lanzamiento falle, la próxima semana queda armada), con logs en ambos casos.
+- Verificación pedida en el enunciado:
+  - `restoreAlarmsAfterBoot` NO se tocó (ver diff): sigue leyendo `repeats`/`triggerAt`
+    del persistido; con el re-arme semanal el `triggerAt` persistido siempre es fresco.
+  - Mapeo `nextWeekdayTime`: `(weekday % 7) + 1` verificado para los 7 días
+    (Dart 1=Lun→Cal 2 … 6=Sáb→7, 7=Dom→1). Correcto.
+  - Snooze (`repeats=false`, id `+100000`) y prueba (`99999`) se limpian al disparar. Correcto.
+- Simulación del paso de una semana (sin JVM/adb en este entorno; réplica exacta de la
+  aritmética en PowerShell): disparo normal Lun 12/10 08:30 → Lun 19/10 08:30 (mismo día
+  y hora); entrega tardía con `now = trigger+16d` → 2 saltos → Lun 02/11 08:30 futuro;
+  réplica de `nextWeekdayTime` (mié→lun 19, lun 7h→hoy, lun 9h→+7) OK. `flutter analyze`
+  limpio; `flutter test` 2/2 OK.
+- Consecuencia conocida: ver hallazgo 7 (intents pre-fix sin extras, transitorio).

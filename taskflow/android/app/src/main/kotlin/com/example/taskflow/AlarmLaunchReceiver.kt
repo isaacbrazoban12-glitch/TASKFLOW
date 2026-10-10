@@ -13,8 +13,21 @@ class AlarmLaunchReceiver : BroadcastReceiver() {
         val weekday = intent.getIntExtra(MainActivity.EXTRA_WEEKDAY, 1)
         val title = intent.getStringExtra(MainActivity.EXTRA_TITLE) ?: "Tarea"
         val alarmId = intent.getIntExtra(MainActivity.EXTRA_ALARM_ID, 0)
+        val repeats = intent.getBooleanExtra(MainActivity.EXTRA_REPEATS, false)
+        val triggerAt = intent.getLongExtra(MainActivity.EXTRA_TRIGGER_AT, System.currentTimeMillis())
 
-        Log.d("AlarmLaunchReceiver", "Disparado alarmId=$alarmId tarea=$title")
+        Log.d("AlarmLaunchReceiver", "Disparado alarmId=$alarmId tarea=$title repeats=$repeats")
+
+        // Re-arme semanal antes de lanzar la actividad: setAlarmClock es one-shot.
+        // Si repite, agenda +7 días (y actualiza el persistido); si no, lo elimina.
+        val next = NativeAlarmHelper.rescheduleNextWeek(
+            context, alarmId, title, taskId, weekday, repeats, triggerAt
+        )
+        if (next != null) {
+            Log.d("AlarmLaunchReceiver", "Reprogramada alarma $alarmId en $next")
+        } else {
+            Log.d("AlarmLaunchReceiver", "Alarma $alarmId no repetitiva, persistencia eliminada")
+        }
 
         val wakeLock = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "taskflow::alarm")

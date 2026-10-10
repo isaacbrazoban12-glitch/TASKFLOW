@@ -103,6 +103,8 @@ class MainActivity : FlutterActivity() {
         const val EXTRA_TASK_ID = "alarm_task_id"
         const val EXTRA_WEEKDAY = "alarm_weekday"
         const val EXTRA_PAYLOAD = "alarm_payload"
+        const val EXTRA_REPEATS = "alarm_repeats"
+        const val EXTRA_TRIGGER_AT = "alarm_trigger_at"
 
         var launchPayload: String? = null
             private set
