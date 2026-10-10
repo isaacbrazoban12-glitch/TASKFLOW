@@ -527,25 +527,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildWebNotice() {
+  /// Aviso en plataformas sin alarmas del sistema (web y escritorio).
+  /// En móvil no hay nada que avisar: lista vacía.
+  List<Widget> _buildPlatformNotice() {
+    if (isAndroid || isIOS) return const [];
+    final text = isWeb
+        ? 'Versión web: las alarmas no están disponibles y las tareas no se guardan.'
+        : 'Versión de escritorio: no hay alarmas del sistema; la app funciona como lista de tareas.';
     final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      color: colors.secondaryContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, color: colors.onSecondaryContainer),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Versión web: las alarmas no están disponibles y las tareas no se guardan.',
-              style: TextStyle(color: colors.onSecondaryContainer),
+    return [
+      Container(
+        width: double.infinity,
+        color: colors.secondaryContainer,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: colors.onSecondaryContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(color: colors.onSecondaryContainer),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    );
+    ];
   }
 
   Widget _buildBody() {
@@ -607,7 +615,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (isWeb) _buildWebNotice(),
+          ..._buildPlatformNotice(),
           Expanded(child: _buildBody()),
         ],
       ),

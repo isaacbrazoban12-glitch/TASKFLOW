@@ -236,3 +236,11 @@
   en web (llega al SnackBar existente) y `HomePage` muestra aviso fijo arriba.
   Notificaciones en web ya eran no-op (`_supported` false). Verificado con
   `flutter build web` (compila OK). `flutter analyze` limpio; `flutter test` 30/30.
+
+### D8. Escritorio sin alarmas: aviso en app (2026-10-10)
+- Contexto: `NotificationService` es no-op fuera de Android/iOS.
+- Decisión (opción más simple): NO implementar notificaciones de escritorio
+  (alarmas exactas y full-screen no existen ahí de forma fiable; demasiado grande).
+  Se reutiliza el aviso de D7: en escritorio la app muestra "no hay alarmas del
+  sistema; funciona como lista de tareas" y la limitación queda en el README.
+  `flutter analyze` limpio; `flutter test` 30/30.
