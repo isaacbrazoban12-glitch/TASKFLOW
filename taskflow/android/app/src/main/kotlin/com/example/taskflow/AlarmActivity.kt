@@ -7,6 +7,8 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
@@ -26,6 +28,8 @@ class AlarmActivity : AppCompatActivity() {
     private var alarmId: Int = 0
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private val timeHandler = Handler(Looper.getMainLooper())
+    private var timeTicker: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +51,13 @@ class AlarmActivity : AppCompatActivity() {
 
         val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         tvTime.text = timeFormat.format(Date())
+        timeTicker = object : Runnable {
+            override fun run() {
+                tvTime.text = timeFormat.format(Date())
+                timeHandler.postDelayed(this, 1000)
+            }
+        }
+        timeHandler.postDelayed(timeTicker!!, 1000)
 
         tvTaskTitle.text = taskTitle
 
@@ -122,6 +133,8 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        timeTicker?.let { timeHandler.removeCallbacks(it) }
+        timeTicker = null
         stopAlarmSoundAndVibration()
         super.onDestroy()
     }

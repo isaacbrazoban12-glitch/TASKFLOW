@@ -57,7 +57,7 @@
         android:drawableStart="@android:drawable/ic_menu_send"
         android:drawablePadding="8dp"
         android:paddingHorizontal="16dp"
-        android:backgroundTint="#4CAF50"
+        android:backgroundTint="#2E7D32"
         android:gravity="center" />
 
     <Button

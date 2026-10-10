@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -71,12 +73,22 @@ class AlarmDialog extends StatefulWidget {
 class _AlarmDialogState extends State<AlarmDialog> {
   int _snoozeCount = 0;
   late String _currentTime;
+  Timer? _clock;
 
   @override
   void initState() {
     super.initState();
     _loadSnoozeCount();
     _updateTime();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(_updateTime);
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSnoozeCount() async {
@@ -169,7 +181,8 @@ class _AlarmDialogState extends State<AlarmDialog> {
                       style: TextStyle(fontSize: 18),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4CAF50),
+                      // Verde oscuro: blanco encima da 5.13:1 (WCAG AA).
+                      backgroundColor: const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
