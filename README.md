@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="taskflow/icon.png" alt="Icono de TaskFlow" width="128" />
+  <img src="icon.png" alt="Icono de TaskFlow" width="128" />
 </p>
 
 <h1 align="center">TaskFlow</h1>
