@@ -1,12 +1,16 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_themes.dart';
 import 'database/database_helper.dart';
 import 'db_ffi.dart';
 import 'platform_info.dart';
 import 'models/task.dart';
 import 'notification_service.dart';
+import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
+import 'widgets/home_header.dart';
+import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
 import 'widgets/task_tile.dart';
 
@@ -23,36 +27,54 @@ void main() async {
   } catch (e) {
     debugPrint('[main] Error inicializando notificaciones: $e');
   }
-  runApp(const TaskFlowApp());
+  final themeController = await ThemeController.load();
+  runApp(TaskFlowApp(themeController: themeController));
 }
 
-class TaskFlowApp extends StatelessWidget {
-  const TaskFlowApp({super.key});
+class TaskFlowApp extends StatefulWidget {
+  final ThemeController themeController;
+
+  TaskFlowApp({super.key, ThemeController? themeController})
+      : themeController = themeController ?? ThemeController();
+
+  @override
+  State<TaskFlowApp> createState() => _TaskFlowAppState();
+}
+
+class _TaskFlowAppState extends State<TaskFlowApp> {
+  @override
+  void initState() {
+    super.initState();
+    widget.themeController.startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    widget.themeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      debugShowCheckedModeBanner: false,
-      title: 'TaskFlow',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-      ),
-      themeMode: ThemeMode.system,
-      home: const HomePage(),
+    return ListenableBuilder(
+      listenable: widget.themeController,
+      builder: (context, _) {
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          debugShowCheckedModeBanner: false,
+          title: 'TaskFlow',
+          theme: appThemeOf(widget.themeController.current).data,
+          home: HomePage(themeController: widget.themeController),
+        );
+      },
     );
   }
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final ThemeController themeController;
+
+  const HomePage({super.key, required this.themeController});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -66,6 +88,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _alarmDialogOpen = false;
   bool _overlayDialogOpen = false;
   bool _overlayGranted = true;
+  int? _filterWeekday;
 
   @override
   void initState() {
@@ -91,6 +114,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _onAppResumed() async {
     try {
+      widget.themeController.refresh();
       _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await _checkLaunchPayload();
       await _applyPendingAlarmActions();
@@ -604,19 +628,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: _tasks.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final task = _tasks[index];
-        return TaskTile(
-          task: task,
-          onTap: () => _openTaskDialog(task: task),
-          onCheckboxChanged: (_) => _toggleTask(task),
-          onDelete: () => _deleteTask(task),
-        );
-      },
+    final daysWithTasks = <int>{
+      for (final task in _tasks) ...task.weekdays,
+    };
+    final visible = _filterWeekday == null
+        ? _tasks
+        : _tasks.where((t) => t.weekdays.contains(_filterWeekday)).toList();
+    final next = findNextAlarm(_tasks, DateTime.now());
+    return Column(
+      children: [
+        WeekStrip(
+          selected: _filterWeekday,
+          daysWithTasks: daysWithTasks,
+          onSelect: (day) => setState(() => _filterWeekday = day),
+        ),
+        if (next != null) NextAlarmCard(task: next.task, when: next.when),
+        Expanded(
+          child: visible.isEmpty
+              ? const Center(
+                  child: Text('Sin tareas este día.'),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: visible.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final task = visible[index];
+                    return TaskTile(
+                      task: task,
+                      onTap: () => _openTaskDialog(task: task),
+                      onCheckboxChanged: (_) => _toggleTask(task),
+                      onDelete: () => _deleteTask(task),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -643,6 +690,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadTasks,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Ajustes de tema',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SettingsPage(themeController: widget.themeController),
+                ),
+              );
+            },
           ),
         ],
       ),

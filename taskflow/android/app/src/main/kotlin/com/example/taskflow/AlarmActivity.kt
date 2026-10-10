@@ -2,6 +2,7 @@ package com.example.taskflow
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.res.ColorStateList
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -14,6 +15,8 @@ import android.os.Vibrator
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
@@ -78,7 +81,27 @@ class AlarmActivity : AppCompatActivity() {
             finishWithAction("snoozed")
         }
 
+        applyTheme(ThemeHelper.currentTheme(this))
         startAlarmSoundAndVibration()
+    }
+
+    /**
+     * Tiñe la pantalla con el tema vigente (ver `ThemeHelper`).
+     * No toca sonido, vibración, acciones ni reprogramación.
+     */
+    private fun applyTheme(theme: AlarmTheme) {
+        findViewById<LinearLayout>(R.id.alarmRoot).setBackgroundColor(theme.background)
+        findViewById<ImageView>(R.id.alarmIcon).setColorFilter(theme.accent)
+        findViewById<TextView>(R.id.tvTime).setTextColor(theme.onBackground)
+        findViewById<TextView>(R.id.tvTaskTitle).setTextColor(theme.onBackground)
+        findViewById<TextView>(R.id.tvSnoozeCount).setTextColor(theme.onBackground)
+        val btnComplete = findViewById<Button>(R.id.btnComplete)
+        btnComplete.backgroundTintList = ColorStateList.valueOf(theme.accent)
+        btnComplete.setTextColor(theme.onAccent)
+        val btnSnooze = findViewById<Button>(R.id.btnSnooze)
+        btnSnooze.backgroundTintList =
+            ColorStateList.valueOf((theme.accent and 0x00FFFFFF) or 0x40000000)
+        btnSnooze.setTextColor(theme.onBackground)
     }
 
     private fun startAlarmSoundAndVibration() {

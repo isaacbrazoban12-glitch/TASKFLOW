@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/alarmRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -8,6 +9,7 @@
     android:background="@drawable/alarm_gradient_bg">
 
     <ImageView
+        android:id="@+id/alarmIcon"
         android:layout_width="80dp"
         android:layout_height="80dp"
         android:src="@android:drawable/ic_lock_idle_alarm"

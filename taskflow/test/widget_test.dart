@@ -49,7 +49,7 @@ void main() {
   });
 
   testWidgets('TaskFlowApp renders correctly', (WidgetTester tester) async {
-    await tester.pumpWidget(const TaskFlowApp());
+    await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Mis Tareas'), findsOneWidget);
@@ -57,7 +57,7 @@ void main() {
   });
 
   testWidgets('Empty state shows message', (WidgetTester tester) async {
-    await tester.pumpWidget(const TaskFlowApp());
+    await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Aún no tienes tareas.\nToca + para agregar una.'), findsOneWidget);
@@ -68,7 +68,7 @@ void main() {
       const Task(title: 'Regar plantas', weekdays: [1], hour: 8, minute: 30),
     );
 
-    await tester.pumpWidget(const TaskFlowApp());
+    await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Regar plantas'), findsOneWidget);
@@ -83,7 +83,7 @@ void main() {
       const Task(title: 'Estudiar', weekdays: [1], hour: 8, minute: 30),
     );
 
-    await tester.pumpWidget(const TaskFlowApp());
+    await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(Checkbox));

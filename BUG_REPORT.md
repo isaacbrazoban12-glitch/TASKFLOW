@@ -3,9 +3,10 @@
 ## Resumen
 
 1. Arreglado (nuevo): sonido+vibración en `AlarmActivity`, migración a canal silencioso `taskflow_backup` (resuelve BUG-05), fallback `fullScreenIntent` sin overlay, Completar/Posponer desde Kotlin sin abrir `MainActivity`, reloj en vivo + verde 5.13:1 (resuelve BUG-08), crash Gson/R8 en release con ProGuard (resuelve BUG-09, verificado en Xiaomi real); P5 verificado sin cambios (rutas ya consistentes).
-2. Pendiente: 4 hallazgos de riesgo medio-bajo (canal perdido si Dart no está listo, `setIntent` ausente, ruido en logs de tests, intents pre-fix transitorios).
-3. Nivel de riesgo general: **medio** — lo funcional está cubierto y verificado en tests; el riesgo restante es no haber probado en dispositivo real (sonido, alarmas exactas, boot, ahorro agresivo) ni compilado Kotlin aquí, más la revisión de permisos en Google Play.
-4. Verificación final: `flutter analyze` sin issues y `flutter test` 35/35 (salida pegada al final).
+2. Nuevo (feat/temas): 4 temas automáticos (Rosa/Medianoche/Grafito/Bosque) con modo manual, horario (Rosa 6–12, Grafito 12–18, Medianoche 18–6, Bosque finde) y rotación; pantalla principal rediseñada (franja semanal, tarjeta Siguiente alarma); Ajustes con previews; `AlarmActivity` con el tema vigente calculado en Kotlin. Todo verificado en el Xiaomi real (ver D16).
+3. Pendiente: 4 hallazgos de riesgo medio-bajo (canal perdido si Dart no está listo, `setIntent` ausente, ruido en logs de tests, intents pre-fix transitorios).
+4. Nivel de riesgo general: **medio-bajo** — verificado en dispositivo real (disparo, re-arme, completar nativo, temas, ajustes); pendiente boot real, ahorro agresivo, iOS y revisión de Play.
+5. Verificación final: `flutter analyze` sin issues y `flutter test` 48/48 (salida pegada al final).
 5. Regla de sesión aplicada: solo se arregló lo de la lista del usuario; el resto está aquí con sugerencia.
 
 ## Hallazgos
@@ -189,14 +190,23 @@ Resuelve BUG-08.
 `src="icon.png"`: todo apunta al mismo fichero existente. No se movió nada (moverlo lo
 rompería); tampoco hay commits vacíos.
 
+### D16. Temas verificados en Xiaomi real (2026-10-10)
+Release instalado: Bosque activo en sábado por horario, cambio a Manual/Rosa desde
+Ajustes aplicado en vivo (previews y radio correctos), tarea creada que disparó a su
+hora (`Disparado` + `Reprogramada` + `Lanzando AlarmActivity` en logcat), Completar
+nativo aplicado sin abrir `MainActivity` (pendiente consumido después: tile tachado).
+El `flutter build apk --release` además compila el Kotlin (cazó un `isNotEmpty`
+sin paréntesis antes de commitear). Nota: el canal viejo `taskflow_alarms` reaparece
+en `dumpsys` por notificaciones pendientes anteriores al cambio; inofensivo (nada
+nuevo lo usa) y se limpia al disparar/cancelar.
+
 ## Cosas que no pude probar
 
-- Dispositivo Android real: disparo exacto, `AlarmActivity` sobre bloqueo, toque de
-  la notificación de respaldo, arranque en frío real y los 3 casos de `alarm_action`.
-- Sonido/vibración reales, `BOOT_COMPLETED` y restauración tras reinicio en equipo real.
-- Roundtrip Kotlin→Dart de acciones pendientes con la app muerta (diseñado idempotente,
-  solo cubierto con tests del consumo y la frescura).
-- Kotlin sin compilar aquí (sin SDK): revisado a mano; `flutter analyze` no lo cubre.
+- `AlarmActivity` sobre bloqueo y píxeles exactos del tema nativo (disparó y cerró
+  antes de capturarla; el `applyTheme` corrió sin errores).
+- Sonido/vibración de oído (solo el usuario en el equipo), `BOOT_COMPLETED` real y
+  toque de la notificación de respaldo.
+- Arranque en frío real de los 3 casos de `alarm_action` (ruta ya sin productor tras P3).
 - Fabricantes con ahorro agresivo (Xiaomi/Huawei/Oppo): exención de batería y
   `setAlarmClock` bajo Doze.
 - Ventana real posponer→2 min→suena a los 5 (solo cubierta con tests deterministas).
@@ -206,12 +216,10 @@ rompería); tampoco hay commits vacíos.
 
 ## Siguiente paso recomendado
 
-1. Probar en un Android físico el checklist (sonido/vibración, frío/fondo/abierta,
-   snooze 2→5 min con app muerta, reinicio, semana siguiente sin abrir la app) con
-   `logcat -s AlarmLaunchReceiver:NativeAlarmHelper`.
+1. Escuchar sonido/vibración y probar snooze completo con app muerta en el Xiaomi.
 2. Rellenar declaraciones de Play (exactas + especiales) antes del AAB.
 3. Aplicar el resto del backlog visual (`docs/VISUAL_AUDIT.md`): quitar "Probar
-   notificación" en release, agrupar por día, Semantics (contraste y reloj ya hechos).
+   notificación" en release, Semantics (contraste, reloj y agrupar ya hechos).
 4. Quitar `USE_EXACT_ALARM`/`USE_FULL_SCREEN_INTENT` si Play los cuestiona.
 
 ## Verificación final (2026-10-10, `taskflow/`)
@@ -219,17 +227,19 @@ rompería); tampoco hay commits vacíos.
 `flutter analyze`:
 ```
 Analyzing taskflow...
-No issues found! (ran in 2.0s)
+No issues found!
 ```
 
-`flutter test` (35/35):
+`flutter test` (48/48):
 - `test/snooze_key_test.dart`: 5/5 (clave multiplataforma, reload, limpieza)
 - `test/snooze_test.dart`: 9/9 (ids con/sin snooze, marca ±5 min, vencida→null+limpia,
   clear, pendientes consume-una-vez/json-roto, frescura)
+- `test/theme_test.dart`: 13/13 (horario por defecto, rotación, reglas, prefs, temas)
 - `test/task_test.dart`: 17/17 (serialización/legacy, stops, ocurrencia, efectivo+reinicio)
 - `test/widget_test.dart`: 4/4 (render, vacío, lista desde BD, checkbox→tachado)
 - Resultado: `All tests passed!`
 - Nota: los widget tests loguean `LateInitializationError` en
-  `getNotificationAppLaunchDetails` (plugin sin inicializar en tests, capturado) y
-  `Permisos concedidos: false`; es ruido (BUG-04), no fallo. El caso de json roto
+  `getNotificationAppLaunchDetails` (plugin sin inicializar en tests, capturado);
+  es ruido (BUG-04), no fallo. El caso de json roto loguea además el
+  `FormatException` esperado del catch.
   loguea además el `FormatException` esperado del catch.
