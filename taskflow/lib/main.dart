@@ -248,7 +248,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
         final action = data['action'] as String? ?? '';
         if (action == 'completed') {
-          await _completeTaskFromAlarm(taskId);
+          await _completeTaskFromAlarm(taskId, weekday);
         } else if (action == 'snoozed') {
           await _snoozeTaskFromAlarm(taskId, weekday);
         }
@@ -323,7 +323,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
           final action = data['action'] as String? ?? '';
           if (action == 'completed') {
-            _completeTaskFromAlarm(taskId);
+            _completeTaskFromAlarm(taskId, weekday);
           } else if (action == 'snoozed') {
             _snoozeTaskFromAlarm(taskId, weekday);
           }
@@ -333,6 +333,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _showAlarmDialog(Map<String, dynamic> data) {
+    // En Android la única pantalla de alarma es la nativa (AlarmActivity):
+    // la notificación es solo respaldo y al tocarla solo se abre la app.
+    if (Platform.isAndroid) return;
     final taskId = data['taskId'] as int? ?? -1;
     final taskTitle = data['title'] as String? ?? 'Tarea';
     final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
@@ -361,7 +364,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         taskId: taskId,
         taskTitle: taskTitle,
         weekday: weekday,
-        onCompleted: () => _completeTaskFromAlarm(taskId),
+        onCompleted: () => _completeTaskFromAlarm(taskId, weekday),
         onSnoozed: () => _snoozeTaskFromAlarm(taskId, weekday),
       ),
     ).whenComplete(() async {
@@ -370,9 +373,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _completeTaskFromAlarm(int taskId) async {
+  Future<void> _completeTaskFromAlarm(int taskId, int weekday) async {
     if (taskId <= 0) return;
     try {
+      await NotificationService.instance.dismissBackupNotification(taskId, weekday);
       final tasks = await _db.getTasks();
       final task = tasks.firstWhere(
         (t) => t.id == taskId,
@@ -403,6 +407,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _snoozeTaskFromAlarm(int taskId, int weekday) async {
     if (taskId <= 0) return;
     try {
+      await NotificationService.instance.dismissBackupNotification(taskId, weekday);
       final tasks = await _db.getTasks();
       final task = tasks.firstWhere(
         (t) => t.id == taskId,

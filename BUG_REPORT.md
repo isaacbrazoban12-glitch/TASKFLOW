@@ -49,6 +49,32 @@
 - Evidencia: salida de `flutter test` del 2026-10-10.
 - Severidad: baja (ruido en tests, no fallo).
 
+### 5. Canal de notificación Android inmutable: el cambio a respaldo silencioso puede no aplicar a usuarios existentes
+- Fecha: 2026-10-10
+- Archivo: `taskflow/lib/notification_service.dart` (`alarmChannelId = 'taskflow_alarms'`)
+- Hallazgo: en Android 8+, sonido/importancia/vibración son propiedades del canal,
+  no de cada notificación. Al mantener el mismo `channelId` y solo cambiar
+  `fullScreenIntent`/`playSound` por notificación, los dispositivos que ya crearon
+  el canal `taskflow_alarms` con sonido podrían seguir sonando hasta que el usuario
+  borre datos o reinstale. Requeriría migrar a un nuevo `channelId` (fuera de la lista).
+- Evidencia: inspección de código; `fullScreenIntent` sí es por-notificación y aplica
+  de inmediato; el sonido depende del canal ya creado en el dispositivo.
+- Severidad: media/baja. No se arregla; queda como riesgo conocido.
+
+### 6. Alarma nativa repetitiva es one-shot sin re-agendado al disparar
+- Fecha: 2026-10-10
+- Archivo: `taskflow/android/app/src/main/kotlin/com/example/taskflow/AlarmLaunchReceiver.kt`,
+  `taskflow/android/app/src/main/kotlin/com/example/taskflow/NativeAlarmHelper.kt`
+- Hallazgo: `setAlarmClock` es one-shot y `AlarmLaunchReceiver.onReceive` solo lanza
+  `AlarmActivity` sin re-agendar la siguiente ocurrencia. La nativa solo se re-arme al
+  abrir la app (`_rescheduleAllTasks`) o al reiniciar (boot receiver). Si el usuario no
+  abre la app entre semanas, la alarma nativa de una tarea repetitiva podría no sonar
+  la semana siguiente (antes la notificación con `matchDateTimeComponents` repetía sola).
+  Relevante ahora que la nativa es la única pantalla de alarma en Android.
+- Evidencia: lectura de `AlarmLaunchReceiver.kt` (sin re-agendado) y grep de
+  `_rescheduleAllTasks` (solo se llama al iniciar la app).
+- Severidad: media/alta. No se arregla (fuera de la lista).
+
 ## Decisiones tomadas
 
 ### D1. Fix alarm_action (2026-10-10) — entrega única por canal, sin idempotencia Dart
@@ -63,3 +89,30 @@
   - Segundo plano / abierta: `onNewIntent` solo emite `onAlarmAction` →
     handler aplica; `_checkLaunchPayload` en `resumed` consume `null`. Una sola aplicación.
 - Consecuencia conocida: ver hallazgo 2 (pérdida si Dart no está listo).
+
+### D2. Alarma única nativa en Android (2026-10-10) — notificación como respaldo silencioso
+- Contexto: cada tarea programaba notificación con `fullScreenIntent` + sonido Y alarma
+  nativa (`AlarmManager` → `AlarmActivity`): doble pantalla (`AlarmDialog` + `AlarmActivity`).
+- Cambios:
+  - `notification_service.dart`: los 3 bloques `AndroidNotificationDetails`
+    (`scheduleTask`, `scheduleImmediate`, `scheduleSnooze`) pasan a
+    `fullScreenIntent: false, playSound: false`. Solo tocan Android por construcción
+    (`DarwinNotificationDetails` intacto; escritorio sale por `_supported == false`).
+    Se mantiene `importance/priority`/vibración para que siga visible.
+  - `main.dart` (`_showAlarmDialog`): retorno temprano si `Platform.isAndroid`, en un
+    solo punto en vez de tocar los 3 orígenes (`_checkLaunchPayload`, `_checkInitialAlarm`,
+    `onAlarmTriggered`). Al tocar la notificación solo se abre la app.
+  - Nuevo `dismissBackupNotification(taskId, weekday)` (solo Android; cancela solo el id
+    `taskId*10+weekday`, sin tocar overlays ni otras programaciones) llamado al inicio de
+    `_completeTaskFromAlarm` (nuevo parámetro `weekday`, 3 call-sites actualizados) y
+    `_snoozeTaskFromAlarm` (el snooze usa id distinto `+100000`, sin conflicto).
+- Qué se dejó de usar y código muerto:
+  - `AlarmDialog` (`lib/widgets/alarm_dialog.dart` + `_showAlarmDialog`): sin uso en Android;
+    SIGUE VIVO en iOS/escritorio (no es código muerto, no se borra).
+  - `launchAlarmActivity` (canal `MainActivity` + `NotificationService.launchAlarmActivity`):
+    YA estaba muerto antes del cambio (ningún caller Dart; la vía real es `AlarmManager`).
+    Sigue muerto; NO se borra (limpieza fuera de la lista).
+  - Rama `type == 'alarm'` en `_checkLaunchPayload`: sin productor en Android
+    (`EXTRA_PAYLOAD` solo lleva `alarm_action`); queda como fallback defensivo.
+- Consecuencias conocidas: ver hallazgos 5 (canal existente con sonido) y 6 (repetitiva
+  nativa sin re-agendado al disparar).

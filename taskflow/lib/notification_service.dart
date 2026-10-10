@@ -210,9 +210,9 @@ class NotificationService {
         channelDescription: alarmChannelDesc,
         importance: Importance.max,
         priority: Priority.high,
-        fullScreenIntent: true,
+        fullScreenIntent: false,
         category: AndroidNotificationCategory.alarm,
-        playSound: true,
+        playSound: false,
         enableVibration: true,
         vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
       );
@@ -295,9 +295,9 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: true,
+      fullScreenIntent: false,
       category: AndroidNotificationCategory.alarm,
-      playSound: true,
+      playSound: false,
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
     );
@@ -360,9 +360,9 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: true,
+      fullScreenIntent: false,
       category: AndroidNotificationCategory.alarm,
-      playSound: true,
+      playSound: false,
       enableVibration: true,
       vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
     );
@@ -423,6 +423,17 @@ class NotificationService {
           debugPrint('[NotificationService] ERROR cancelando overlay: $e');
         }
       }
+    }
+  }
+
+  /// Descarta la notificación de respaldo ya mostrada (solo Android).
+  /// No toca las alarmas nativas (AlarmManager) ni otras programaciones.
+  Future<void> dismissBackupNotification(int taskId, int weekday) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _plugin.cancel(taskId * 10 + weekday);
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR descartando respaldo: $e');
     }
   }
 
