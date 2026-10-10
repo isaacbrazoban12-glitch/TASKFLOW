@@ -17,9 +17,10 @@ class NotificationService {
 
   static const MethodChannel _alarmChannel = MethodChannel('taskflow/alarm');
 
-  static const String alarmChannelId = 'taskflow_alarms';
-  static const String alarmChannelName = 'Alarmas de tareas';
-  static const String alarmChannelDesc = 'Alarmas de tareas programadas';
+  static const String alarmChannelId = 'taskflow_backup';
+  static const String alarmChannelName = 'Respaldo de alarmas';
+  static const String alarmChannelDesc = 'Respaldo silencioso de alarmas de tareas';
+  static const String legacyAlarmChannelId = 'taskflow_alarms';
 
   bool get _supported => isAndroid || isIOS;
 
@@ -87,6 +88,7 @@ class NotificationService {
     }
 
     if (isAndroid) {
+      await _deleteLegacyAlarmChannel();
       await _requestAndroidPermissions();
     } else if (isIOS) {
       final IOSFlutterLocalNotificationsPlugin? iosImpl =
@@ -94,6 +96,18 @@ class NotificationService {
       final result = await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
       _permissionsGranted = result ?? false;
       debugPrint('[NotificationService] iOS permisos: $_permissionsGranted');
+    }
+  }
+
+  /// Borra el canal viejo con sonido para que el respaldo use el nuevo silencioso.
+  Future<void> _deleteLegacyAlarmChannel() async {
+    try {
+      final AndroidFlutterLocalNotificationsPlugin? androidImpl =
+          _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await androidImpl?.deleteNotificationChannel(legacyAlarmChannelId);
+      debugPrint('[NotificationService] Canal legacy eliminado');
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR eliminando canal legacy: $e');
     }
   }
 

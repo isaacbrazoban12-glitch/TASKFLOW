@@ -3,8 +3,14 @@ package com.example.taskflow
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
@@ -20,6 +26,8 @@ class AlarmActivity : AppCompatActivity() {
     private var weekday: Int = 1
     private var taskTitle: String = "Tarea"
     private var alarmId: Int = 0
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +68,64 @@ class AlarmActivity : AppCompatActivity() {
             incrementSnoozeCount(taskId, weekday)
             finishWithAction("snoozed")
         }
+
+        startAlarmSoundAndVibration()
+    }
+
+    private fun startAlarmSoundAndVibration() {
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            if (uri != null) {
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(this@AlarmActivity, uri)
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
+        }
+        try {
+            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500, 1000), 0))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(longArrayOf(0, 1000, 500, 1000), 0)
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmActivity", "No se pudo vibrar: $e")
+        }
+    }
+
+    private fun stopAlarmSoundAndVibration() {
+        try {
+            mediaPlayer?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            mediaPlayer?.release()
+        } catch (_: Exception) {
+        }
+        mediaPlayer = null
+        try {
+            vibrator?.cancel()
+        } catch (_: Exception) {
+        }
+        vibrator = null
+    }
+
+    override fun onDestroy() {
+        stopAlarmSoundAndVibration()
+        super.onDestroy()
     }
 
     private fun setupWindowFlags() {
@@ -94,6 +160,7 @@ class AlarmActivity : AppCompatActivity() {
             put("alarmId", alarmId)
         }.toString()
 
+        stopAlarmSoundAndVibration()
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_PAYLOAD, payload)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
