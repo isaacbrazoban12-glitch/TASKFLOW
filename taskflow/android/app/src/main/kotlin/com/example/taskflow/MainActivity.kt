@@ -77,7 +77,8 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         val payload = intent.getStringExtra(EXTRA_PAYLOAD)
         if (payload != null) {
-            launchPayload = payload
+            // Entrega única por el canal: no guardar en launchPayload para evitar
+            // que _checkLaunchPayload lo aplique una segunda vez al reanudar.
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
                 MethodChannel(messenger, CHANNEL).invokeMethod("onAlarmAction", payload)
             }

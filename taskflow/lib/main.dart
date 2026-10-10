@@ -243,6 +243,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _showAlarmDialog(data);
         });
+      } else if (data['type'] == 'alarm_action') {
+        final taskId = data['taskId'] as int? ?? -1;
+        final weekday = data['weekday'] as int? ?? DateTime.now().weekday;
+        final action = data['action'] as String? ?? '';
+        if (action == 'completed') {
+          await _completeTaskFromAlarm(taskId);
+        } else if (action == 'snoozed') {
+          await _snoozeTaskFromAlarm(taskId, weekday);
+        }
       }
     } catch (e) {
       debugPrint('[HomePage] Error leyendo payload de lanzamiento: $e');
