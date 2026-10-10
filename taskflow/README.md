@@ -1,4 +1,12 @@
-# TaskFlow
+<p align="center">
+  <img src="icon.png" alt="Icono de TaskFlow" width="128" />
+</p>
+
+<h1 align="center">TaskFlow</h1>
+
+<p align="center">
+  App Flutter de alarmas para tareas semanales.
+</p>
 
 App Flutter de alarmas para tareas semanales. Cada tarea tiene días de la semana
 y hora; en Android suena una alarma nativa a pantalla completa (`AlarmActivity`)
