@@ -10,6 +10,7 @@ import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/home_header.dart';
+import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
 import 'widgets/task_tile.dart';
 
@@ -689,6 +690,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadTasks,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Ajustes de tema',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SettingsPage(themeController: widget.themeController),
+                ),
+              );
+            },
           ),
         ],
       ),
