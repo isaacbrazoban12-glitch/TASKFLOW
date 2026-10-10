@@ -155,3 +155,32 @@
   réplica de `nextWeekdayTime` (mié→lun 19, lun 7h→hoy, lun 9h→+7) OK. `flutter analyze`
   limpio; `flutter test` 2/2 OK.
 - Consecuencia conocida: ver hallazgo 7 (intents pre-fix sin extras, transitorio).
+
+### D4. Completitud por ocurrencia (2026-10-10) — `completedAt` + BD v2
+- Contexto: `completed=true` era permanente y `_rescheduleAllTasks` cancelaba todo lo
+  completado al abrir la app: una semanal completada una vez dejaba de sonar.
+- Cambios (mínimos, sin refactor visual):
+  - `Task`: nuevo `completedAt` (ms época, null). `completed` conserva su significado de
+    "detenida para siempre". Nuevos puros y testeados: `stopsOnComplete`, `isStopped`,
+    `lastOccurrenceBeforeOrAt(now)` (convención Dart 1=Lun…7=Dom) e
+    `isEffectivelyCompleted(now)` (detenida→true; repetitiva sin stop→true solo si la
+    marca cubre la última ocurrencia, reinicio natural al llegar la siguiente).
+    `copyWith` gana `clearCompletedAt`; `toMap`/`fromMap` incluyen la columna
+    (`fromMap` tolera filas sin la clave).
+  - BD v2 con `onUpgrade` que conserva datos: `ADD COLUMN completedAt` + convierte filas
+    legacy (`repeats=1, stop=0, completed=1`) a `completed=0, completedAt=ahora`.
+  - `_applyCompletion`: repetitiva sin stop al completar → marca fecha + re-agenda
+    (futuras siguen activas); stop → `completed=true` + cancela; al desmarcar → limpia
+    marca y agenda siempre (antes solo si `stopsWhenComplete`; agendar de más es
+    idempotente porque `scheduleTask` cancela primero).
+  - `_rescheduleAllTasks`: `isStopped → cancel`, si no → `schedule`. Se elimina la rama
+    de `snoozeDeadline` (muerta según hallazgo 1: `setSnoozeDeadline` sin callers; los
+    métodos se conservan).
+  - `TaskTile`: muestra/tacha con el estado efectivo (sin cambiar su API).
+    `_toggleTask` invierte el estado efectivo.
+  - `TaskFormDialog`: si lo guardado está detenido → `cancelTask`, si no → `scheduleTask`
+    (antes siempre agendaba y reactivaba detenidas).
+- Tests: nuevo `test/task_test.dart` (17 casos: serialización/legacy/copyWith,
+  stops/isStopped, última ocurrencia, efectivo incl. reinicio y borde exacto).
+  `flutter analyze` limpio; `flutter test` 19/19 OK.
+- Sin hallazgos nuevos en este problema.

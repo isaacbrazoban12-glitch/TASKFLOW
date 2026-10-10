@@ -7,6 +7,7 @@ class Task {
   final bool repeats;
   final bool stopOnComplete;
   final bool completed;
+  final int? completedAt;
 
   const Task({
     this.id,
@@ -17,9 +18,42 @@ class Task {
     this.repeats = true,
     this.stopOnComplete = false,
     this.completed = false,
+    this.completedAt,
   });
 
   bool get hasValidDays => weekdays.isNotEmpty;
+
+  /// true si al completar la tarea debe detenerse para siempre
+  /// (no se repite, o tiene stopOnComplete).
+  bool get stopsOnComplete => stopOnComplete || !repeats;
+
+  /// true si la tarea está detenida de forma permanente.
+  bool get isStopped => completed;
+
+  /// Última ocurrencia programada en o antes de [now] (null sin días válidos).
+  /// Usa convención Dart (weekday 1=Lun … 7=Dom), igual que lo guardado.
+  DateTime? lastOccurrenceBeforeOrAt(DateTime now) {
+    if (weekdays.isEmpty) return null;
+    final today = DateTime(now.year, now.month, now.day, hour, minute);
+    for (int back = 0; back < 8; back++) {
+      final day = today.subtract(Duration(days: back));
+      if (weekdays.contains(day.weekday) && !day.isAfter(now)) return day;
+    }
+    return null;
+  }
+
+  /// Estado "completada" efectivo a fecha [now].
+  /// - Detenida → siempre true.
+  /// - Repetitiva sin stopOnComplete → true solo si [completedAt] cubre la
+  ///   última ocurrencia; al llegar la siguiente se reinicia a false.
+  bool isEffectivelyCompleted(DateTime now) {
+    if (completed) return true;
+    if (completedAt == null) return false;
+    if (stopOnComplete || !repeats) return false;
+    final last = lastOccurrenceBeforeOrAt(now);
+    if (last == null) return false;
+    return !DateTime.fromMillisecondsSinceEpoch(completedAt!).isBefore(last);
+  }
 
   Map<String, Object?> toMap() {
     return {
@@ -31,6 +65,7 @@ class Task {
       'repeats': repeats ? 1 : 0,
       'stopOnComplete': stopOnComplete ? 1 : 0,
       'completed': completed ? 1 : 0,
+      'completedAt': completedAt,
     };
   }
 
@@ -63,6 +98,7 @@ class Task {
       repeats: map['repeats'] == 1 || map['repeats'] == true,
       stopOnComplete: map['stopOnComplete'] == 1 || map['stopOnComplete'] == true,
       completed: map['completed'] == 1 || map['completed'] == true,
+      completedAt: (map['completedAt'] as num?)?.toInt(),
     );
   }
 
@@ -75,6 +111,8 @@ class Task {
     bool? repeats,
     bool? stopOnComplete,
     bool? completed,
+    int? completedAt,
+    bool clearCompletedAt = false,
   }) {
     return Task(
       id: id ?? this.id,
@@ -85,6 +123,7 @@ class Task {
       repeats: repeats ?? this.repeats,
       stopOnComplete: stopOnComplete ?? this.stopOnComplete,
       completed: completed ?? this.completed,
+      completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
     );
   }
 }

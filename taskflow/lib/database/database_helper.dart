@@ -22,8 +22,9 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDb,
+      onUpgrade: _upgradeDb,
     );
   }
 
@@ -37,9 +38,27 @@ class DatabaseHelper {
         minute INTEGER NOT NULL,
         repeats INTEGER NOT NULL DEFAULT 1,
         stopOnComplete INTEGER NOT NULL DEFAULT 0,
-        completed INTEGER NOT NULL DEFAULT 0
+        completed INTEGER NOT NULL DEFAULT 0,
+        completedAt INTEGER NULL
       )
     ''');
+  }
+
+  Future<void> _upgradeDb(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN completedAt INTEGER NULL');
+      // Datos legacy: una repetitiva sin stopOnComplete con completed=1 solo había
+      // terminado la ocurrencia actual -> se desmarca como detenida pero conserva
+      // la marca fechada ahora (se reinicia al llegar la siguiente ocurrencia).
+      await db.update(
+        'tasks',
+        {
+          'completed': 0,
+          'completedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'repeats = 1 AND stopOnComplete = 0 AND completed = 1',
+      );
+    }
   }
 
   Future<int> insertTask(Task task) async {

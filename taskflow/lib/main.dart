@@ -101,15 +101,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final tasks = await _db.getTasks();
       for (final task in tasks) {
         if (task.id == null) continue;
-        if (!task.completed) {
-          final snooze = await NotificationService.instance.snoozeDeadline(task.id!);
-          if (snooze != null) {
-            debugPrint('[HomePage] Tarea ${task.id} con snooze activo, omitiendo re-agendado');
-            continue;
-          }
-          await NotificationService.instance.scheduleTask(task);
-        } else {
+        // Solo las detenidas (no se repiten o con stopOnComplete) pierden sus
+        // alarmas. Una repetitiva sin stop completada solo marcó la ocurrencia
+        // (completedAt) y sus futuras alarmas siguen activas.
+        if (task.isStopped) {
           await NotificationService.instance.cancelTask(task.id!);
+        } else {
+          await NotificationService.instance.scheduleTask(task);
         }
       }
       debugPrint('[HomePage] Re-agendadas ${tasks.length} tareas');
@@ -389,16 +387,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _applyCompletion(Task task, bool completed) async {
-    final updated = task.copyWith(completed: completed);
+    // Repetitiva sin stopOnComplete: completar solo marca la ocurrencia actual
+    // (fecha) y las alarmas futuras siguen activas.
+    if (completed && !task.stopsOnComplete) {
+      final updated = task.copyWith(
+        completed: false,
+        completedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      await _db.updateTask(updated);
+      await NotificationService.instance.clearSnoozeDeadline(task.id!);
+      await NotificationService.instance.scheduleTask(updated);
+      await _loadTasks();
+      return;
+    }
+
+    final updated = completed
+        ? task.copyWith(completed: true, clearCompletedAt: true)
+        : task.copyWith(completed: false, clearCompletedAt: true);
     await _db.updateTask(updated);
 
-    final stopsWhenComplete = task.stopOnComplete || !task.repeats;
     if (completed) {
       await NotificationService.instance.clearSnoozeDeadline(task.id!);
-      if (stopsWhenComplete) {
-        await NotificationService.instance.cancelTask(task.id!);
-      }
-    } else if (stopsWhenComplete) {
+      await NotificationService.instance.cancelTask(task.id!);
+    } else {
       await NotificationService.instance.scheduleTask(updated);
     }
     await _loadTasks();
@@ -448,7 +459,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTask(Task task) async {
-    final newCompleted = !task.completed;
+    final newCompleted = !task.isEffectivelyCompleted(DateTime.now());
 
     try {
       await _applyCompletion(task, newCompleted);

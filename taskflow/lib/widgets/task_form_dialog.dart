@@ -81,7 +81,13 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
         savedTask = baseTask;
       }
 
-      await NotificationService.instance.scheduleTask(savedTask);
+      // Editar una tarea detenida (completada sin repetición o con stop)
+      // no debe reactivar sus alarmas.
+      if (savedTask.isStopped && savedTask.id != null) {
+        await NotificationService.instance.cancelTask(savedTask.id!);
+      } else {
+        await NotificationService.instance.scheduleTask(savedTask);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
