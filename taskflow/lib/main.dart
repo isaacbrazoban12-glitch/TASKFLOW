@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_themes.dart';
 import 'database/database_helper.dart';
 import 'db_ffi.dart';
 import 'platform_info.dart';
 import 'models/task.dart';
 import 'notification_service.dart';
+import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/home_header.dart';
 import 'widgets/task_form_dialog.dart';
@@ -24,36 +26,54 @@ void main() async {
   } catch (e) {
     debugPrint('[main] Error inicializando notificaciones: $e');
   }
-  runApp(const TaskFlowApp());
+  final themeController = await ThemeController.load();
+  runApp(TaskFlowApp(themeController: themeController));
 }
 
-class TaskFlowApp extends StatelessWidget {
-  const TaskFlowApp({super.key});
+class TaskFlowApp extends StatefulWidget {
+  final ThemeController themeController;
+
+  TaskFlowApp({super.key, ThemeController? themeController})
+      : themeController = themeController ?? ThemeController();
+
+  @override
+  State<TaskFlowApp> createState() => _TaskFlowAppState();
+}
+
+class _TaskFlowAppState extends State<TaskFlowApp> {
+  @override
+  void initState() {
+    super.initState();
+    widget.themeController.startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    widget.themeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      debugShowCheckedModeBanner: false,
-      title: 'TaskFlow',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-      ),
-      themeMode: ThemeMode.system,
-      home: const HomePage(),
+    return ListenableBuilder(
+      listenable: widget.themeController,
+      builder: (context, _) {
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          debugShowCheckedModeBanner: false,
+          title: 'TaskFlow',
+          theme: appThemeOf(widget.themeController.current).data,
+          home: HomePage(themeController: widget.themeController),
+        );
+      },
     );
   }
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final ThemeController themeController;
+
+  const HomePage({super.key, required this.themeController});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -93,6 +113,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _onAppResumed() async {
     try {
+      widget.themeController.refresh();
       _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await _checkLaunchPayload();
       await _applyPendingAlarmActions();
