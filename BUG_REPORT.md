@@ -247,6 +247,41 @@
 - Sin hallazgos nuevos (el cuelgue FFI/widgets queda como limitación del entorno,
   no de la app).
 
+## Google Play — permisos sensibles (revisión pedida 2026-10-10, sin cambios)
+
+Se revisa `taskflow/android/app/src/main/AndroidManifest.xml`. NO se quita ningún
+permiso: son el núcleo de las alarmas. Los de riesgo conocido para revisión de Play:
+
+1. `SYSTEM_ALERT_WINDOW` (especial, riesgo alto)
+   Uso: `AlarmActivity` sobre otras apps (pantalla de alarma intrusiva).
+   Riesgo: Play exige justificarlo en la declaración de la app; solo se acepta si
+   es función principal (una app de alarmas lo es, pero pasa revisión manual).
+2. `USE_EXACT_ALARM` (preinstalada/sistema, riesgo alto)
+   Uso: acompaña a `SCHEDULE_EXACT_ALARM` para `setAlarmClock`/`setExactAndAllowWhileIdle`.
+   Riesgo: está reservada a apps del sistema o elegibles; para una app de terceros
+   Play espera `SCHEDULE_EXACT_ALARM` con declaración. Tener ambas puede provocar
+   rechazo o petición de quitar `USE_EXACT_ALARM`.
+3. `SCHEDULE_EXACT_ALARM` (especial, riesgo medio)
+   Uso: alarmas exactas semanales y snooze de 5 min.
+   Riesgo: requiere declaración de uso en Play Console ("alarma" es caso aceptado,
+   pero hay que declararlo; sin declaración, rechazo).
+4. `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (riesgo medio)
+   Uso: pedir exención para sonar con la app cerrada.
+   Riesgo: la política de Play la restringe salvo que la función principal se vea
+   afectada (aquí sí) y con declaración; históricamente genera rechazos si se pide
+   sin justificación visible en la ficha.
+5. `USE_FULL_SCREEN_INTENT` (especial, riesgo medio-bajo)
+   Uso: hoy las notificaciones ya NO usan `fullScreenIntent` (D2), pero el permiso
+   sigue declarado.
+   Riesgo: Play lo limita a apps de llamada/alarma (somos alarma, aceptable con
+   declaración), pero al ya no usarse el full-screen podría plantearse quitarlo en
+   el futuro (fuera de esta revisión: no se toca).
+
+Sin riesgo especial (normales/tiempo de ejecución): `POST_NOTIFICATIONS`,
+`RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `WAKE_LOCK`.
+Recomendación al publicar: rellenar en Play Console la declaración de alarmas
+exactas y el formulario de permisos especiales antes de subir el AAB.
+
 ### D7. Web no se rompe (2026-10-10)
 - Contexto: `import 'dart:io'` en `main.dart` y `notification_service.dart` impedía
   compilar a web; además `sqflite_common_ffi` (dart:ffi) tampoco compila en navegador.
