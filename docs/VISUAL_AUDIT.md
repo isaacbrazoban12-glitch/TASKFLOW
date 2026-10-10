@@ -43,7 +43,7 @@ Solo observación y documentación. **No se cambió código de interfaz.**
 | Hora | 64sp bold blanca | 64sp bold `#FFFFFF`, `marginTop 32dp` | Idéntico |
 | Título | 24sp `white70` | 24sp `#B3FFFFFF` (=70 %) | Idéntico |
 | Contador | 16sp blanco 60 % | 16sp `#99FFFFFF` (=60 %) | Idéntico |
-| Botón completar | Verde `#4CAF50`, 56dp, 18sp | Verde `backgroundTint`, 56dp, 18sp | Idéntico |
+| Botón completar | Verde `#2E7D32`, 56dp, 18sp | Verde `backgroundTint`, 56dp, 18sp | Idéntico |
 | Botón posponer | Outline blanco, 56dp | `#80FFFFFF`, 56dp | Casi idéntico |
 | Icono | `Icons.alarm` `#E94560` 80dp | `ic_lock_idle_alarm` tint `#E94560` 80dp | Equivalente |
 | Márgenes | 32/24/16/48/16 | 32/24/16/48/16 | Idénticos |
@@ -56,7 +56,7 @@ Umbrales: texto normal ≥ 4.5:1, texto grande ≥ 3.0:1.
 
 | Par | Ratio | Veredicto |
 |---|---|---|
-| Blanco sobre `#4CAF50` (Completar, 18sp) | **2.78:1** | **Suspende** (ni siquiera grande) |
+| Blanco sobre `#2E7D32` (Completar, 18sp) | **5.13:1** | **AA** (antes `#4CAF50`: 2.78, suspenso; corregido) |
 | Blanco sobre `#80FFFFFF`+marino (Posponer nativo, 18sp) | 3.19:1 | Justo (pasa como grande, sin margen) |
 | Blanco sobre gradiente (`#0F3460`–`#1A1A2E`) | 12.5–17:1 | AAA |
 | Título 70 % sobre `#16213E` | 8.4:1 | AAA |
@@ -144,7 +144,7 @@ alarma nativa intacta (no tocar lo que funciona).
 ### Backlog priorizado (esfuerzo S/M/L × impacto)
 
 1. Quitar "Probar notificación" en release — **S, alto** (confianza).
-2. Subir contraste del botón Completar (fondo más oscuro o texto negro) — **S, alto**.
+2. ~~Subir contraste del botón Completar~~ — hecho (`#2E7D32`, 5.13:1).
 3. Contraste del Posponer nativo (`#80FFFFFF` → sólido) — **S, alto**.
 4. `Semantics`/labels en checkbox, borrar, chips — **S, medio-alto**.
 5. Agrupar lista por día + marca "hoy" — **M, alto**.
@@ -152,4 +152,4 @@ alarma nativa intacta (no tocar lo que funciona).
 7. Deshacer al eliminar — **S, medio**.
 8. Vacío ilustrado + atajo a crear — **S, bajo-medio**.
 9. Verificar `AlarmDialog` a 150 % / pantallas pequeñas (scroll si hace falta) — **S, medio**.
-10. Hora de la alarma en vivo (ver `BUG_REPORT.md` hallazgo 8) — **S, bajo**.
+10. ~~Hora de la alarma en vivo~~ — hecho (ticker 1 s en Dart y nativa).

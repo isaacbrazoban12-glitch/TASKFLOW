@@ -2,10 +2,10 @@
 
 ## Resumen
 
-1. Arreglado: acción `alarm_action` perdida en arranque en frío, doble aplicación por canal+payload, doble pantalla de alarma (notificación silenciosa ahora), re-arme semanal nativo, completitud por ocurrencia con BD v2, marca de snooze viva, clave de contador unificada Dart/Kotlin, compilación web, aviso en escritorio, código muerto y README/tests.
-2. Pendiente: 6 hallazgos de riesgo medio-bajo (canal perdido si Dart no está listo, canal de notificación inmutable en equipos ya instalados, `setIntent` ausente, ruido en logs de tests, intents pre-fix transitorios, hora congelada en alarma).
-3. Nivel de riesgo general: **medio** — lo funcional está cubierto y verificado; el riesgo restante es no haber probado en dispositivo real (alarmas exactas, boot, ahorro de batería agresivo) y la revisión de permisos en Google Play.
-4. Verificación final: `flutter analyze` sin issues y `flutter test` 32/32 (salida pegada al final).
+1. Arreglado (nuevo): sonido+vibración en `AlarmActivity`, migración a canal silencioso `taskflow_backup` (resuelve BUG-05), fallback `fullScreenIntent` sin overlay, Completar/Posponer desde Kotlin sin abrir `MainActivity`, reloj en vivo + verde 5.13:1 (resuelve BUG-08); P5 verificado sin cambios (rutas ya consistentes).
+2. Pendiente: 4 hallazgos de riesgo medio-bajo (canal perdido si Dart no está listo, `setIntent` ausente, ruido en logs de tests, intents pre-fix transitorios).
+3. Nivel de riesgo general: **medio** — lo funcional está cubierto y verificado en tests; el riesgo restante es no haber probado en dispositivo real (sonido, alarmas exactas, boot, ahorro agresivo) ni compilado Kotlin aquí, más la revisión de permisos en Google Play.
+4. Verificación final: `flutter analyze` sin issues y `flutter test` 35/35 (salida pegada al final).
 5. Regla de sesión aplicada: solo se arregló lo de la lista del usuario; el resto está aquí con sugerencia.
 
 ## Hallazgos
@@ -39,11 +39,13 @@
 - Qué se sugiere: inicializar o mockear el plugin en `setUpAll`; fuera de la lista.
 
 ### BUG-05 — Canal `taskflow_alarms` inmutable en equipos ya instalados
-- ID | Severidad | Estado: **BUG-05 | media | pendiente**
+- ID | Severidad | Estado: **BUG-05 | media | arreglado**
 - Archivo y línea: `taskflow/lib/notification_service.dart:20` (`alarmChannelId`)
 - Cómo reproducirlo: instalar versión con sonido, actualizar a la versión silenciosa (D2) y disparar una alarma: en Android 8+ el sonido puede persistir porque es propiedad del canal ya creado.
 - Esperado vs. real: esperado = respaldo siempre silencioso; real = `fullScreenIntent` aplica al momento, el sonido depende del canal existente.
-- Qué se sugiere: migrar a un nuevo `channelId`; fuera de la lista.
+- Cómo se arregló: nuevo `channelId` silencioso `taskflow_backup` + borrado del viejo
+  con `deleteNotificationChannel` en `init()` (D11). Nota: notificaciones ya agendadas
+  con el id viejo migran al abrir la app (`cancelTask`+re-agendado).
 
 ### BUG-06 — Nativa repetitiva one-shot sin re-agendado
 - ID | Severidad | Estado: **BUG-06 | alta | arreglado**
@@ -60,11 +62,13 @@
 - Qué se sugiere: lectura de respaldo en prefs si falta el extra; fuera de la lista.
 
 ### BUG-08 — Hora congelada en la pantalla de alarma
-- ID | Severidad | Estado: **BUG-08 | baja | pendiente**
+- ID | Severidad | Estado: **BUG-08 | baja | arreglado**
 - Archivo y línea: `taskflow/lib/widgets/alarm_dialog.dart:89` (`_updateTime` solo en `initState`); `AlarmActivity.kt:43` (`tvTime` solo en `onCreate`)
 - Cómo reproducirlo: dejar la pantalla de alarma abierta: la hora no avanza.
 - Esperado vs. real: esperado = reloj en vivo; real = hora fija de apertura (detectado en auditoría visual).
-- Qué se sugiere: ticker de 1 min en Dart y `Handler` en Kotlin; fuera de la lista.
+- Cómo se arregló: ticker de 1 s en Dart (`Timer`, con `cancel` en `dispose`) y `Handler`
+  en nativa (con `removeCallbacks` en `onDestroy`); verde `#4CAF50` → `#2E7D32`
+  (blanco encima 5.13:1) en Dart y XML (D14).
 
 ## Google Play — permisos sensibles (revisión pedida, sin cambios)
 
@@ -129,41 +133,78 @@ Eliminado `launchAlarmActivity` (0 referencias) e import sin usar en Kotlin.
 `FakeDatabaseHelper` + seam `@visibleForTesting` (FFI cuelga `testWidgets` en este
 entorno); 4 casos en `widget_test.dart`.
 
+### D11. Sonido+vibración y canal silencioso nuevo (2026-10-10)
+`AlarmActivity` reproduce el ringtone del sistema en bucle (`USAGE_ALARM`) y vibra en
+patrón mientras está abierta; parada al completar/posponer y en `onDestroy` (todo con
+try/catch para no romper si no hay sonido). Respaldo migrado a `taskflow_backup`
+silencioso + borrado del viejo con `deleteNotificationChannel` en `init()`
+(verificado en el fuente del plugin: el nativo lo soporta). Resuelve BUG-05; las
+pendientes con id viejo migran al abrir la app.
+
+### D12. Fallback con `fullScreenIntent` sin overlay (2026-10-10)
+Notificaciones con `fullScreenIntent` solo si falta el permiso de overlay
+(`_needsFullScreenFallback`); Dart vuelve a mostrar `AlarmDialog` en ese caso
+(`_overlayGranted` cacheado en inicio y resume). Con overlay, intacto. Nota: el
+plugin solo abre la app principal, así que el "hacia AlarmActivity" se cumple vía
+diálogo (no hay ruta nativa directa sin Dart).
+
+### D13. Completar/Posponer desde Kotlin (2026-10-10)
+`AlarmActivity` aplica en nativo y cierra sin `MainActivity`: snooze agenda el overlay
++5 min (mismo id `+100000` que Dart), fija la marca y guarda acción pendiente; complete
+cancela las nativas de la tarea (nuevo `cancelAlarmsForTask` por `taskId` persistido).
+Dart consume el registro al iniciar/resumir (DB, respaldo flutter con trigger exacto,
+marca; snooze vencido se ignora). Re-agendados duplicados son reemplazos idempotentes.
+
+### D14. Reloj en vivo y verde AA (2026-10-10)
+`Timer` 1 s (con `cancel` en `dispose`) y `Handler` nativo (con `removeCallbacks` en
+`onDestroy`); verde `#4CAF50` → `#2E7D32` (5.13:1, el más claro que pasa) en Dart y XML.
+Resuelve BUG-08.
+
+### D15. Icono ya consistente, sin cambios (2026-10-10)
+`icon.png` en raíz + `image_path: "../icon.png"` (relativo a `taskflow/`) + README con
+`src="icon.png"`: todo apunta al mismo fichero existente. No se movió nada (moverlo lo
+rompería); tampoco hay commits vacíos.
+
 ## Cosas que no pude probar
 
 - Dispositivo Android real: disparo exacto, `AlarmActivity` sobre bloqueo, toque de
   la notificación de respaldo, arranque en frío real y los 3 casos de `alarm_action`.
-- `BOOT_COMPLETED` y restauración tras reinicio en equipo real.
+- Sonido/vibración reales, `BOOT_COMPLETED` y restauración tras reinicio en equipo real.
+- Roundtrip Kotlin→Dart de acciones pendientes con la app muerta (diseñado idempotente,
+  solo cubierto con tests del consumo y la frescura).
+- Kotlin sin compilar aquí (sin SDK): revisado a mano; `flutter analyze` no lo cubre.
 - Fabricantes con ahorro agresivo (Xiaomi/Huawei/Oppo): exención de batería y
   `setAlarmClock` bajo Doze.
 - Ventana real posponer→2 min→suena a los 5 (solo cubierta con tests deterministas).
 - Comportamiento en iOS (sin dispositivo Apple) y resultado de la revisión de Play.
-- Reloj en vivo de alarma y `AlarmDialog` a 150 % en pantalla pequeña.
+- `AlarmDialog` a 150 % en pantalla pequeña.
 
 ## Siguiente paso recomendado
 
-1. Probar en un Android físico el checklist (frío/fondo/abierta, snooze 2→5 min,
-   reinicio, semana siguiente sin abrir la app) con `logcat -s AlarmLaunchReceiver`.
+1. Probar en un Android físico el checklist (sonido/vibración, frío/fondo/abierta,
+   snooze 2→5 min con app muerta, reinicio, semana siguiente sin abrir la app) con
+   `logcat -s AlarmLaunchReceiver:NativeAlarmHelper`.
 2. Rellenar declaraciones de Play (exactas + especiales) antes del AAB.
-3. Aplicar el backlog visual (`docs/VISUAL_AUDIT.md`): contraste del botón Completar
-   (2.78:1), quitar "Probar notificación" en release, agrupar por día, Semantics.
-4. Migrar `channelId` si hay base instalada con sonido (BUG-05) y quitar
-   `USE_EXACT_ALARM`/`USE_FULL_SCREEN_INTENT` si Play los cuestiona.
+3. Aplicar el resto del backlog visual (`docs/VISUAL_AUDIT.md`): quitar "Probar
+   notificación" en release, agrupar por día, Semantics (contraste y reloj ya hechos).
+4. Quitar `USE_EXACT_ALARM`/`USE_FULL_SCREEN_INTENT` si Play los cuestiona.
 
 ## Verificación final (2026-10-10, `taskflow/`)
 
 `flutter analyze`:
 ```
 Analyzing taskflow...
-No issues found! (ran in 1.8s)
+No issues found! (ran in 2.0s)
 ```
 
-`flutter test` (32/32):
+`flutter test` (35/35):
 - `test/snooze_key_test.dart`: 5/5 (clave multiplataforma, reload, limpieza)
-- `test/snooze_test.dart`: 6/6 (ids con/sin snooze, marca ±5 min, vencida→null+limpia, clear)
+- `test/snooze_test.dart`: 9/9 (ids con/sin snooze, marca ±5 min, vencida→null+limpia,
+  clear, pendientes consume-una-vez/json-roto, frescura)
 - `test/task_test.dart`: 17/17 (serialización/legacy, stops, ocurrencia, efectivo+reinicio)
 - `test/widget_test.dart`: 4/4 (render, vacío, lista desde BD, checkbox→tachado)
 - Resultado: `All tests passed!`
 - Nota: los widget tests loguean `LateInitializationError` en
   `getNotificationAppLaunchDetails` (plugin sin inicializar en tests, capturado) y
-  `Permisos concedidos: false`; es ruido (BUG-04), no fallo.
+  `Permisos concedidos: false`; es ruido (BUG-04), no fallo. El caso de json roto
+  loguea además el `FormatException` esperado del catch.
