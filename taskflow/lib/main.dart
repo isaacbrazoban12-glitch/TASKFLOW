@@ -7,6 +7,7 @@ import 'platform_info.dart';
 import 'models/task.dart';
 import 'notification_service.dart';
 import 'widgets/alarm_dialog.dart';
+import 'widgets/home_header.dart';
 import 'widgets/task_form_dialog.dart';
 import 'widgets/task_tile.dart';
 
@@ -66,6 +67,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _alarmDialogOpen = false;
   bool _overlayDialogOpen = false;
   bool _overlayGranted = true;
+  int? _filterWeekday;
 
   @override
   void initState() {
@@ -604,19 +606,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: _tasks.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final task = _tasks[index];
-        return TaskTile(
-          task: task,
-          onTap: () => _openTaskDialog(task: task),
-          onCheckboxChanged: (_) => _toggleTask(task),
-          onDelete: () => _deleteTask(task),
-        );
-      },
+    final daysWithTasks = <int>{
+      for (final task in _tasks) ...task.weekdays,
+    };
+    final visible = _filterWeekday == null
+        ? _tasks
+        : _tasks.where((t) => t.weekdays.contains(_filterWeekday)).toList();
+    final next = findNextAlarm(_tasks, DateTime.now());
+    return Column(
+      children: [
+        WeekStrip(
+          selected: _filterWeekday,
+          daysWithTasks: daysWithTasks,
+          onSelect: (day) => setState(() => _filterWeekday = day),
+        ),
+        if (next != null) NextAlarmCard(task: next.task, when: next.when),
+        Expanded(
+          child: visible.isEmpty
+              ? const Center(
+                  child: Text('Sin tareas este día.'),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: visible.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final task = visible[index];
+                    return TaskTile(
+                      task: task,
+                      onTap: () => _openTaskDialog(task: task),
+                      onCheckboxChanged: (_) => _toggleTask(task),
+                      onDelete: () => _deleteTask(task),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 

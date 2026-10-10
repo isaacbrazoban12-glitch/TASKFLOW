@@ -42,6 +42,17 @@ class Task {
     return null;
   }
 
+  /// Próxima ocurrencia estrictamente posterior a [now] (null sin días válidos).
+  DateTime? nextOccurrenceAfter(DateTime now) {
+    if (weekdays.isEmpty) return null;
+    final today = DateTime(now.year, now.month, now.day, hour, minute);
+    for (int fwd = 0; fwd < 8; fwd++) {
+      final day = today.add(Duration(days: fwd));
+      if (weekdays.contains(day.weekday) && day.isAfter(now)) return day;
+    }
+    return null;
+  }
+
   /// Estado "completada" efectivo a fecha [now].
   /// - Detenida → siempre true.
   /// - Repetitiva sin stopOnComplete → true solo si [completedAt] cubre la
