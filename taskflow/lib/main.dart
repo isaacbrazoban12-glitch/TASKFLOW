@@ -65,6 +65,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _alarmDialogOpen = false;
   bool _overlayDialogOpen = false;
+  bool _overlayGranted = true;
 
   @override
   void initState() {
@@ -90,6 +91,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _onAppResumed() async {
     try {
+      _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await _checkLaunchPayload();
     } catch (e) {
       debugPrint('[HomePage] Error al reanudar la app: $e');
@@ -134,6 +136,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
       await _ensureOverlayPermission();
       await _ensureBatteryOptimization();
+      _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await AlarmDialog.clearStaleSnoozeCounts();
       await _checkLaunchPayload();
       await _checkInitialAlarm();
@@ -338,9 +341,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _showAlarmDialog(Map<String, dynamic> data) {
-    // En Android la única pantalla de alarma es la nativa (AlarmActivity):
-    // la notificación es solo respaldo y al tocarla solo se abre la app.
-    if (isAndroid) return;
+    // En Android con overlay la única pantalla de alarma es la nativa
+    // (AlarmActivity). Sin overlay, el diálogo es el respaldo (la notificación
+    // usa fullScreenIntent y al tocarla solo se abre la app).
+    if (isAndroid && _overlayGranted) return;
     final taskId = data['taskId'] as int? ?? -1;
     final taskTitle = data['title'] as String? ?? 'Tarea';
     final weekday = data['weekday'] as int? ?? DateTime.now().weekday;

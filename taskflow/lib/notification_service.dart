@@ -226,7 +226,7 @@ class NotificationService {
         channelDescription: alarmChannelDesc,
         importance: Importance.max,
         priority: Priority.high,
-        fullScreenIntent: false,
+        fullScreenIntent: await _needsFullScreenFallback(),
         category: AndroidNotificationCategory.alarm,
         playSound: false,
         enableVibration: true,
@@ -311,7 +311,7 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: false,
+      fullScreenIntent: await _needsFullScreenFallback(),
       category: AndroidNotificationCategory.alarm,
       playSound: false,
       enableVibration: true,
@@ -376,7 +376,7 @@ class NotificationService {
       channelDescription: alarmChannelDesc,
       importance: Importance.max,
       priority: Priority.high,
-      fullScreenIntent: false,
+      fullScreenIntent: await _needsFullScreenFallback(),
       category: AndroidNotificationCategory.alarm,
       playSound: false,
       enableVibration: true,
@@ -448,6 +448,13 @@ class NotificationService {
         }
       }
     }
+  }
+
+  /// En Android sin permiso de overlay, la notificación usa fullScreenIntent
+  /// como respaldo para mostrar la alarma (el diálogo lo muestra Dart).
+  Future<bool> _needsFullScreenFallback() async {
+    if (!isAndroid) return false;
+    return !(await canDrawOverlays());
   }
 
   /// Descarta la notificación de respaldo ya mostrada (solo Android).
