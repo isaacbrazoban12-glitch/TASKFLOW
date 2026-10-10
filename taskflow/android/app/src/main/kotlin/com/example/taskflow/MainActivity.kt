@@ -60,14 +60,6 @@ class MainActivity : FlutterActivity() {
                         finishAndRemoveTask()
                         result.success(true)
                     }
-                    "launchAlarmActivity" -> {
-                        val taskId = call.argument<Int>("taskId") ?: -1
-                        val title = call.argument<String>("title") ?: "Tarea"
-                        val weekday = call.argument<Int>("weekday") ?: 1
-                        val alarmId = call.argument<Int>("alarmId") ?: 0
-                        launchAlarmActivity(taskId, title, weekday, alarmId)
-                        result.success(true)
-                    }
                     else -> result.notImplemented()
                 }
             }
@@ -83,17 +75,6 @@ class MainActivity : FlutterActivity() {
                 MethodChannel(messenger, CHANNEL).invokeMethod("onAlarmAction", payload)
             }
         }
-    }
-
-    private fun launchAlarmActivity(taskId: Int, title: String, weekday: Int, alarmId: Int) {
-        val intent = Intent(this, AlarmActivity::class.java).apply {
-            putExtra(EXTRA_ALARM_ID, alarmId)
-            putExtra(EXTRA_TITLE, title)
-            putExtra(EXTRA_TASK_ID, taskId)
-            putExtra(EXTRA_WEEKDAY, weekday)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
     }
 
     companion object {

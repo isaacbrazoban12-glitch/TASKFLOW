@@ -541,26 +541,6 @@ class NotificationService {
     }
   }
 
-  Future<void> launchAlarmActivity({
-    required int taskId,
-    required String title,
-    required int weekday,
-    required int alarmId,
-  }) async {
-    if (!isAndroid) return;
-    try {
-      await _alarmChannel.invokeMethod('launchAlarmActivity', {
-        'taskId': taskId,
-        'title': title,
-        'weekday': weekday,
-        'alarmId': alarmId,
-      });
-      debugPrint('[NotificationService] AlarmActivity lanzada para tarea $taskId');
-    } catch (e) {
-      debugPrint('[NotificationService] ERROR lanzando AlarmActivity: $e');
-    }
-  }
-
   tz.TZDateTime _nextInstanceOfWeekdayTime(int weekday, int hour, int minute) {
     if (weekday < 1 || weekday > 7) {
       throw ArgumentError('weekday debe estar entre 1 y 7, se recibió: $weekday');

@@ -228,6 +228,15 @@
   `flutter analyze` limpio; `flutter test` 30/30 OK.
 - Sin hallazgos nuevos.
 
+### D9. Limpieza de código muerto (2026-10-10)
+- Eliminado `launchAlarmActivity`: método Dart en `NotificationService`, rama del
+  canal y `private fun` en `MainActivity` (sin callers; la vía real es `AlarmManager`).
+  Verificado con grep: 0 referencias restantes. Actualiza D2 (ya no queda muerto).
+- Eliminado `import android.provider.Settings` sin usar en `AlarmLaunchReceiver.kt`.
+- `flutter analyze` sin issues (incl. el `unnecessary_brace_in_string_interps` que
+  introdujo el cambio a `platform_info` en P1, ya corregido).
+- Sin hallazgos nuevos.
+
 ### D7. Web no se rompe (2026-10-10)
 - Contexto: `import 'dart:io'` en `main.dart` y `notification_service.dart` impedía
   compilar a web; además `sqflite_common_ffi` (dart:ffi) tampoco compila en navegador.
