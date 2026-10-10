@@ -282,6 +282,15 @@ Sin riesgo especial (normales/tiempo de ejecución): `POST_NOTIFICATIONS`,
 Recomendación al publicar: rellenar en Play Console la declaración de alarmas
 exactas y el formulario de permisos especiales antes de subir el AAB.
 
+### 8. La hora de la pantalla de alarma no avanza (2026-10-10)
+- Fecha: 2026-10-10
+- Archivo: `taskflow/lib/widgets/alarm_dialog.dart` (`_updateTime` solo en `initState`),
+  `taskflow/android/app/src/main/kotlin/com/example/taskflow/AlarmActivity.kt` (`tvTime` solo en `onCreate`)
+- Hallazgo: ambas pantallas fijan la hora al abrirse y nunca la actualizan
+  (detectado en la auditoría visual; `docs/VISUAL_AUDIT.md` lo cita en el backlog).
+- Evidencia: lectura de código.
+- Severidad: baja (cosmético). No se arregla (fuera de la lista).
+
 ### D7. Web no se rompe (2026-10-10)
 - Contexto: `import 'dart:io'` en `main.dart` y `notification_service.dart` impedía
   compilar a web; además `sqflite_common_ffi` (dart:ffi) tampoco compila en navegador.
