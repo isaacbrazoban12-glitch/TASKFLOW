@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taskflow/notification_service.dart';
@@ -58,6 +60,39 @@ void main() {
       expect(await NotificationService.instance.snoozeDeadline(3), isNotNull);
       await NotificationService.instance.clearSnoozeDeadline(3);
       expect(await NotificationService.instance.snoozeDeadline(3), isNull);
+    });
+  });
+
+  group('NotificationService.pendingAlarmActions', () {
+    test('consume devuelve y borra (una sola vez)', () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'taskflow_pending_actions',
+        jsonEncode([
+          {'action': 'completed', 'taskId': 1, 'weekday': 2, 'title': 'A', 'triggerAt': 123},
+          {'action': 'snoozed', 'taskId': 1, 'weekday': 2, 'title': 'A', 'triggerAt': 456},
+        ]),
+      );
+      final first = await NotificationService.instance.consumePendingAlarmActions();
+      expect(first.length, 2);
+      expect(first[0]['action'], 'completed');
+      expect(first[1]['taskId'], 1);
+      final second = await NotificationService.instance.consumePendingAlarmActions();
+      expect(second, isEmpty);
+    });
+
+    test('sin registro devuelve vacio y json roto devuelve vacio', () async {
+      expect(await NotificationService.instance.consumePendingAlarmActions(), isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('taskflow_pending_actions', 'no-json{{{');
+      expect(await NotificationService.instance.consumePendingAlarmActions(), isEmpty);
+    });
+
+    test('frescura del trigger: futuro si, pasado no', () {
+      const now = 1000000;
+      expect(NotificationService.isSnoozeTriggerFresh(now + 1, now), isTrue);
+      expect(NotificationService.isSnoozeTriggerFresh(now, now), isFalse);
+      expect(NotificationService.isSnoozeTriggerFresh(now - 1, now), isFalse);
     });
   });
 }

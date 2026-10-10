@@ -2,7 +2,6 @@ package com.example.taskflow
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -15,7 +14,6 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -150,22 +148,29 @@ class AlarmActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Aplica la acción en nativo y cierra SIN abrir MainActivity.
+     * Dart aplica su parte después leyendo la acción pendiente guardada.
+     */
     private fun finishWithAction(action: String) {
-        val payload = JSONObject().apply {
-            put("type", "alarm_action")
-            put("action", action)
-            put("taskId", taskId)
-            put("title", taskTitle)
-            put("weekday", weekday)
-            put("alarmId", alarmId)
-        }.toString()
-
         stopAlarmSoundAndVibration()
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra(MainActivity.EXTRA_PAYLOAD, payload)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (taskId <= 0) {
+            finish()
+            return
         }
-        startActivity(intent)
+        if (action == "snoozed") {
+            incrementSnoozeCount(taskId, weekday)
+            val triggerAt = System.currentTimeMillis() + 5L * 60 * 1000
+            val snoozeId = taskId * 10 + weekday + 100000
+            NativeAlarmHelper.scheduleAlarm(this, snoozeId, taskTitle, taskId, weekday, false, triggerAt)
+            // Marca para que Dart no toque nada aunque tarde en arrancar.
+            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .edit().putLong("flutter.snooze_deadline_$taskId", triggerAt).apply()
+            NativeAlarmHelper.storePendingAction(this, "snoozed", taskId, weekday, taskTitle, triggerAt)
+        } else {
+            NativeAlarmHelper.cancelAlarmsForTask(this, taskId)
+            NativeAlarmHelper.storePendingAction(this, "completed", taskId, weekday, taskTitle, System.currentTimeMillis())
+        }
         finish()
     }
 

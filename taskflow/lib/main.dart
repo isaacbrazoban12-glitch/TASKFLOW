@@ -93,6 +93,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await _checkLaunchPayload();
+      await _applyPendingAlarmActions();
     } catch (e) {
       debugPrint('[HomePage] Error al reanudar la app: $e');
     }
@@ -139,6 +140,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _overlayGranted = await NotificationService.instance.canDrawOverlays();
       await AlarmDialog.clearStaleSnoozeCounts();
       await _checkLaunchPayload();
+      await _applyPendingAlarmActions();
       await _checkInitialAlarm();
       await _rescheduleAllTasks();
     } catch (e) {
@@ -426,7 +428,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await _loadTasks();
   }
 
-  Future<void> _snoozeTaskFromAlarm(int taskId, int weekday) async {
+  Future<void> _snoozeTaskFromAlarm(int taskId, int weekday, {int? triggerAtMillis}) async {
     if (taskId <= 0) return;
     try {
       await NotificationService.instance.dismissBackupNotification(taskId, weekday);
@@ -435,9 +437,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         (t) => t.id == taskId,
         orElse: () => throw Exception('Tarea no encontrada'),
       );
-      await NotificationService.instance.scheduleSnooze(task, weekday);
+      await NotificationService.instance.scheduleSnooze(task, weekday, triggerAtMillis: triggerAtMillis);
     } catch (e) {
       debugPrint('[HomePage] Error posponiendo tarea desde alarma: $e');
+    }
+  }
+
+  /// Aplica en Dart las acciones que AlarmActivity ya aplicó en nativo.
+  /// Un snooze vencido se ignora (ya sonó; la marca se autolimpia al leerla).
+  Future<void> _applyPendingAlarmActions() async {
+    try {
+      final pending = await NotificationService.instance.consumePendingAlarmActions();
+      if (pending.isEmpty) return;
+      debugPrint('[HomePage] Acciones pendientes nativas: ${pending.length}');
+      for (final item in pending) {
+        final action = item['action'] as String? ?? '';
+        final taskId = (item['taskId'] as num?)?.toInt() ?? -1;
+        final weekday = (item['weekday'] as num?)?.toInt() ?? DateTime.now().weekday;
+        final triggerAt = (item['triggerAt'] as num?)?.toInt() ?? 0;
+        if (taskId <= 0) continue;
+        if (action == 'completed') {
+          await _completeTaskFromAlarm(taskId, weekday);
+        } else if (action == 'snoozed') {
+          if (NotificationService.isSnoozeTriggerFresh(
+              triggerAt, DateTime.now().millisecondsSinceEpoch)) {
+            await _snoozeTaskFromAlarm(taskId, weekday, triggerAtMillis: triggerAt);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[HomePage] Error aplicando acciones pendientes: $e');
     }
   }
 

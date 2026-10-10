@@ -362,11 +362,13 @@ class NotificationService {
     }
   }
 
-  Future<void> scheduleSnooze(Task task, int weekday) async {
+  Future<void> scheduleSnooze(Task task, int weekday, {int? triggerAtMillis}) async {
     if (!_supported || task.id == null) return;
 
     final snoozeId = task.id! * 10 + weekday + 100000;
-    final snoozeDate = tz.TZDateTime.now(tz.local).add(const Duration(minutes: 5));
+    final snoozeDate = triggerAtMillis != null
+        ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.local, triggerAtMillis)
+        : tz.TZDateTime.now(tz.local).add(const Duration(minutes: 5));
 
     debugPrint('[NotificationService] Posponiendo tarea ${task.title} a $snoozeDate');
 
@@ -417,7 +419,7 @@ class NotificationService {
         repeats: false,
         triggerAt: snoozeDate,
       );
-      await setSnoozeDeadline(task.id!);
+      await setSnoozeDeadline(task.id!, untilMillis: triggerAtMillis);
     } catch (e) {
       debugPrint('[NotificationService] ERROR programando posposición: $e');
     }
@@ -483,12 +485,36 @@ class NotificationService {
     return deadline;
   }
 
-  Future<void> setSnoozeDeadline(int taskId) async {
+  Future<void> setSnoozeDeadline(int taskId, {int? untilMillis}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(
       _snoozeKey(taskId),
-      DateTime.now().toUtc().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+      untilMillis ?? DateTime.now().toUtc().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
     );
+  }
+
+  /// Un snooze pendiente aún no sonó si su trigger está en futuro.
+  static bool isSnoozeTriggerFresh(int triggerAtMillis, int nowMillis) {
+    return triggerAtMillis > nowMillis;
+  }
+
+  /// Acciones aplicadas en nativo (AlarmActivity) pendientes de aplicar en Dart.
+  /// Al leerlas se borran para aplicarlas una sola vez.
+  Future<List<Map<String, dynamic>>> consumePendingAlarmActions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('taskflow_pending_actions');
+      if (raw == null) return [];
+      await prefs.remove('taskflow_pending_actions');
+      final list = jsonDecode(raw) as List;
+      return list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e) {
+      debugPrint('[NotificationService] ERROR leyendo acciones pendientes: $e');
+      return [];
+    }
   }
 
   Future<void> clearSnoozeDeadline(int taskId) async {
