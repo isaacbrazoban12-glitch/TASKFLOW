@@ -191,7 +191,9 @@ class NotificationService {
       return;
     }
 
-    await cancelTask(task.id!);
+    // No borrar una posposición activa: ni su notificación ni su overlay.
+    final keepSnooze = await snoozeDeadline(task.id!) != null;
+    await cancelTask(task.id!, keepSnooze: keepSnooze);
 
     if (!task.hasValidDays) {
       debugPrint('[NotificationService] Sin días válidos, cancelando');
@@ -401,23 +403,31 @@ class NotificationService {
         repeats: false,
         triggerAt: snoozeDate,
       );
+      await setSnoozeDeadline(task.id!);
     } catch (e) {
       debugPrint('[NotificationService] ERROR programando posposición: $e');
     }
   }
 
-  Future<void> cancelTask(int taskId) async {
-    if (!_supported) return;
+  /// IDs de notificación/overlay de la tarea. Con [includeSnooze] false se
+  /// excluyen los de posposición (`+100000`) para no borrar un snooze activo.
+  static List<int> alarmIdsForTask(int taskId, {bool includeSnooze = true}) {
+    final ids = <int>[];
     for (int weekday = 1; weekday <= 7; weekday++) {
-      await _plugin.cancel(taskId * 10 + weekday);
-      await _plugin.cancel(taskId * 10 + weekday + 100000);
+      ids.add(taskId * 10 + weekday);
+      if (includeSnooze) ids.add(taskId * 10 + weekday + 100000);
+    }
+    return ids;
+  }
+
+  Future<void> cancelTask(int taskId, {bool keepSnooze = false}) async {
+    if (!_supported) return;
+    for (final id in alarmIdsForTask(taskId, includeSnooze: !keepSnooze)) {
+      await _plugin.cancel(id);
       if (Platform.isAndroid) {
         try {
           await _alarmChannel.invokeMethod('cancelOverlayAlarm', {
-            'alarmId': taskId * 10 + weekday,
-          });
-          await _alarmChannel.invokeMethod('cancelOverlayAlarm', {
-            'alarmId': taskId * 10 + weekday + 100000,
+            'alarmId': id,
           });
         } catch (e) {
           debugPrint('[NotificationService] ERROR cancelando overlay: $e');
@@ -444,7 +454,11 @@ class NotificationService {
     final ms = prefs.getInt(_snoozeKey(taskId));
     if (ms == null) return null;
     final deadline = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-    if (deadline.isBefore(DateTime.now().toUtc())) return null;
+    if (deadline.isBefore(DateTime.now().toUtc())) {
+      // La posposición ya sonó: limpiar la marca al leerla.
+      await prefs.remove(_snoozeKey(taskId));
+      return null;
+    }
     return deadline;
   }
 

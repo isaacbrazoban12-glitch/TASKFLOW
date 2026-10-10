@@ -184,3 +184,25 @@
   stops/isStopped, última ocurrencia, efectivo incl. reinicio y borde exacto).
   `flutter analyze` limpio; `flutter test` 19/19 OK.
 - Sin hallazgos nuevos en este problema.
+
+### D5. Marca de snooze viva (2026-10-10) — resuelve hallazgo 1
+- Contexto: `setSnoozeDeadline` nunca se llamaba → `snoozeDeadline` siempre null →
+  `scheduleTask` (vía `cancelTask`) borraba posposiciones pendientes (`+100000`,
+  notificación y overlay) al abrir la app o editar.
+- Cambios (mínimos):
+  - `scheduleSnooze`: llama a `setSnoozeDeadline` tras programar (notificación + overlay).
+  - `cancelTask(taskId, {keepSnooze=false})` + `alarmIdsForTask(includeSnooze)` pura y
+    testeada: con `keepSnooze` se conservan los ids `+100000` (flutter y overlay).
+    Ruta por defecto idéntica a antes (mismo orden e ids).
+  - `scheduleTask`: `keepSnooze = (await snoozeDeadline(task.id!) != null)`. Protege
+    también la vía edición (`TaskFormDialog`) y desmarcar. Vale en iOS igual (mismo bug
+    latente en sus ids `+100000`; el overlay solo existe en Android).
+  - `_rescheduleAllTasks`: con snooze activo omite el re-agendado de esa tarea
+    (rama revivida de D4, ahora con setter real).
+  - `snoozeDeadline`: autolimpia la marca vencida al leerla ("ya sonó"). Al completar
+    ya se limpiaba en ambas ramas de `_applyCompletion` (verificado, sin cambios).
+- Tests: nuevo `test/snooze_test.dart` (6 casos: ids con/sin snooze, marca ~+5min,
+  vencida→null+clave eliminada, sin marca, clear). `flutter analyze` limpio;
+  `flutter test` 25/25 OK.
+- Nota: la marca es por tarea (no por weekday); el skip en `_rescheduleAllTasks` dura
+  como máximo los 5 min del snooze. Sin hallazgos nuevos.

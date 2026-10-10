@@ -107,6 +107,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (task.isStopped) {
           await NotificationService.instance.cancelTask(task.id!);
         } else {
+          // Con posposición activa no se toca nada: ni re-agendar ni cancelar.
+          final snooze = await NotificationService.instance.snoozeDeadline(task.id!);
+          if (snooze != null) {
+            debugPrint('[HomePage] Tarea ${task.id} con snooze activo, omitiendo re-agendado');
+            continue;
+          }
           await NotificationService.instance.scheduleTask(task);
         }
       }
