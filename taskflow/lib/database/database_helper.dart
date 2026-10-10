@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -7,7 +8,13 @@ import '../platform_info.dart';
 class DatabaseHelper {
   DatabaseHelper._();
 
-  static final DatabaseHelper instance = DatabaseHelper._();
+  @visibleForTesting
+  DatabaseHelper.test();
+
+  static DatabaseHelper _instance = DatabaseHelper._();
+  static DatabaseHelper get instance => _instance;
+  @visibleForTesting
+  static set instance(DatabaseHelper value) => _instance = value;
 
   static Database? _database;
 

@@ -237,6 +237,16 @@
   introdujo el cambio a `platform_info` en P1, ya corregido).
 - Sin hallazgos nuevos.
 
+### D10. Widget tests con BD mockeada (2026-10-10)
+- Contexto: `sqflite_common_ffi` en `testWidgets` cuelga este entorno (las operaciones
+  completan pero el test no termina ni con `runAsync`; en `test` plano sí funciona).
+- Decisión: `FakeDatabaseHelper` en memoria + seam mínimo (`DatabaseHelper.test()` e
+  `instance` reasignable, ambos `@visibleForTesting`); `widget_test.dart` con 4 casos
+  (render, vacío, lista desde BD, checkbox→tachado). `flutter analyze` limpio;
+  `flutter test` 32/32 OK.
+- Sin hallazgos nuevos (el cuelgue FFI/widgets queda como limitación del entorno,
+  no de la app).
+
 ### D7. Web no se rompe (2026-10-10)
 - Contexto: `import 'dart:io'` en `main.dart` y `notification_service.dart` impedía
   compilar a web; además `sqflite_common_ffi` (dart:ffi) tampoco compila en navegador.
