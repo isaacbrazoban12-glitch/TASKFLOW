@@ -206,3 +206,24 @@
   `flutter test` 25/25 OK.
 - Nota: la marca es por tarea (no por weekday); el skip en `_rescheduleAllTasks` dura
   como máximo los 5 min del snooze. Sin hallazgos nuevos.
+
+### D6. Clave de contador unificada (2026-10-10)
+- Contexto: Dart generaba `…_2026_10_9` y Kotlin `…_2026_10_09`: en días/meses < 10
+  eran claves distintas y el límite de 3 posposiciones se saltaba; además Dart leía
+  caché vieja frente a escrituras Kotlin.
+- Cambios (mínimos):
+  - `AlarmDialog`: `dateSuffix` (año_mes_día con dos dígitos) + `snoozeKey` público
+    con el mismo formato que Kotlin; `_prefsKey` delega con `DateTime.now()`.
+  - `AlarmActivity.getCurrentYearMonthDay`: `Locale.getDefault()` → `Locale.US` en los
+    tres formatos (dígitos latinos siempre). El formato de hora en pantalla no se toca.
+  - `getSnoozeCount`: `await prefs.reload()` antes de leer.
+  - Nuevo `clearStaleSnoozeCounts` (borra `alarm_dismiss_*` de días anteriores,
+    conserva hoy y el resto) llamado en `_checkPermissionsAndAlarm` al iniciar.
+    Limpia también entradas escritas por Kotlin (mismo store; el plugin antepone
+    `flutter.` en Android de forma transparente).
+- Tests: nuevo `test/snooze_key_test.dart` (5 casos: padding del bug, contrato con
+  literales de clave Kotlin, formato regex, lectura tras reload, limpieza conserva
+  hoy/otros y borra ayer). Kotlin no ejecutable aquí: el contrato se verifica por
+  inspección (mismo patrón `yyyy_MM_dd`, `Locale.US`) + literales en el test.
+  `flutter analyze` limpio; `flutter test` 30/30 OK.
+- Sin hallazgos nuevos.

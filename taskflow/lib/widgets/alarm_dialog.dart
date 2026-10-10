@@ -19,14 +19,42 @@ class AlarmDialog extends StatefulWidget {
 
   static const int maxSnoozeCount = 3;
 
+  /// Sufijo de fecha con dos dígitos, igual que Kotlin
+  /// (`SimpleDateFormat yyyy/MM/dd` con `Locale.US`).
+  static String dateSuffix(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}_${month}_$day';
+  }
+
+  /// Clave del contador, idéntica en Dart y Kotlin (el plugin antepone
+  /// `flutter.` en Android; es la misma entrada).
+  static String snoozeKey(int taskId, int weekday, DateTime date) {
+    return 'alarm_dismiss_${taskId}_${weekday}_${dateSuffix(date)}';
+  }
+
   static String _prefsKey(int taskId, int weekday) {
-    final now = DateTime.now();
-    return 'alarm_dismiss_${taskId}_${weekday}_${now.year}_${now.month}_${now.day}';
+    return snoozeKey(taskId, weekday, DateTime.now());
   }
 
   static Future<int> getSnoozeCount(int taskId, int weekday) async {
     final prefs = await SharedPreferences.getInstance();
+    // La caché Dart puede estar desactualizada frente a escrituras de Kotlin.
+    await prefs.reload();
     return prefs.getInt(_prefsKey(taskId, weekday)) ?? 0;
+  }
+
+  /// Borra contadores de días anteriores para que no se acumulen.
+  static Future<void> clearStaleSnoozeCounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final todaySuffix = dateSuffix(DateTime.now());
+    final stale = prefs.getKeys().where(
+          (key) => key.startsWith('alarm_dismiss_') && !key.endsWith('_$todaySuffix'),
+        );
+    for (final key in stale) {
+      await prefs.remove(key);
+    }
   }
 
   static Future<void> incrementSnoozeCount(int taskId, int weekday) async {

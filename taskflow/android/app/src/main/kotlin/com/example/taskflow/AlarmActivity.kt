@@ -116,10 +116,12 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     private fun getCurrentYearMonthDay(): String {
+        // Locale.US para que mes/día siempre sean dígitos latinos con dos
+        // cifras, igual que Dart (AlarmDialog.dateSuffix).
         val now = Date()
-        val year = SimpleDateFormat("yyyy", Locale.getDefault()).format(now)
-        val month = SimpleDateFormat("MM", Locale.getDefault()).format(now)
-        val day = SimpleDateFormat("dd", Locale.getDefault()).format(now)
+        val year = SimpleDateFormat("yyyy", Locale.US).format(now)
+        val month = SimpleDateFormat("MM", Locale.US).format(now)
+        val day = SimpleDateFormat("dd", Locale.US).format(now)
         return "${year}_${month}_${day}"
     }
 

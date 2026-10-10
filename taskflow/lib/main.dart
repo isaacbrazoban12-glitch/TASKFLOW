@@ -134,6 +134,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
       await _ensureOverlayPermission();
       await _ensureBatteryOptimization();
+      await AlarmDialog.clearStaleSnoozeCounts();
       await _checkLaunchPayload();
       await _checkInitialAlarm();
       await _rescheduleAllTasks();
