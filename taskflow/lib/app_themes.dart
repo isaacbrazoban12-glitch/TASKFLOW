@@ -307,6 +307,144 @@ const Map<AppThemeId, AppTheme> appThemes = {
 
 AppTheme appThemeOf(AppThemeId id) => appThemes[id]!;
 
+/// Paleta del reloj de la pantalla vacía (copia del SVG de referencia).
+class ClockPalette {
+  final Color faceFrom;
+  final Color faceTo;
+  final Color ringLight;
+  final Color ringMid;
+  final Color ringDark;
+  final Color hands;
+  final Color numbers;
+  final Color numbersQuarter;
+  final Color brand;
+  final Color tick;
+  final Color winBg;
+  final Color winBorder;
+  final Color winText;
+  final Color second;
+  final Color hub;
+  final Color sparkA;
+  final Color sparkB;
+  final Color sparkC;
+  final Color halo;
+
+  const ClockPalette({
+    required this.faceFrom,
+    required this.faceTo,
+    required this.ringLight,
+    required this.ringMid,
+    required this.ringDark,
+    required this.hands,
+    required this.numbers,
+    required this.numbersQuarter,
+    required this.brand,
+    required this.tick,
+    required this.winBg,
+    required this.winBorder,
+    required this.winText,
+    required this.second,
+    required this.hub,
+    required this.sparkA,
+    required this.sparkB,
+    required this.sparkC,
+    required this.halo,
+  });
+}
+
+const Map<AppThemeId, ClockPalette> clockPalettes = {
+  AppThemeId.rosa: ClockPalette(
+    faceFrom: Color(0xFF4E3478),
+    faceTo: Color(0xFF2A1744),
+    ringLight: Color(0xFFFFD3E4),
+    ringMid: Color(0xFFC93C74),
+    ringDark: Color(0xFF8F2A55),
+    hands: Color(0xFFFFF6F9),
+    numbers: Color(0xFFE6D9F5),
+    numbersQuarter: Color(0xFFFFD3E4),
+    brand: Color(0xFFE6D9F5),
+    tick: Color(0xFFE6D9F5),
+    winBg: Color(0xFFFFF6F9),
+    winBorder: Color(0xFFE6D9F5),
+    winText: Color(0xFFFFF6F9),
+    second: Color(0xFFC93C74),
+    hub: Color(0xFF2A1744),
+    sparkA: Color(0xFFC93C74),
+    sparkB: Color(0xFFE58BB2),
+    sparkC: Color(0xFF3A2557),
+    halo: Color(0xFFC93C74),
+  ),
+  AppThemeId.medianoche: ClockPalette(
+    faceFrom: Color(0xFF1B2740),
+    faceTo: Color(0xFF0F1828),
+    ringLight: Color(0xFFA5F3FC),
+    ringMid: Color(0xFF22D3EE),
+    ringDark: Color(0xFF0E7490),
+    hands: Color(0xFFF1F5F9),
+    numbers: Color(0xFFE2E8F0),
+    numbersQuarter: Color(0xFFA5F3FC),
+    brand: Color(0xFF94A3B8),
+    tick: Color(0xFFE2E8F0),
+    winBg: Color(0xFFF1F5F9),
+    winBorder: Color(0xFFE2E8F0),
+    winText: Color(0xFFF1F5F9),
+    second: Color(0xFF22D3EE),
+    hub: Color(0xFF0F1828),
+    sparkA: Color(0xFF22D3EE),
+    sparkB: Color(0xFFA5F3FC),
+    sparkC: Color(0xFF0E7490),
+    halo: Color(0xFF22D3EE),
+  ),
+  AppThemeId.grafito: ClockPalette(
+    faceFrom: Color(0xFF2A3139),
+    faceTo: Color(0xFF171B20),
+    ringLight: Color(0xFFFDBA74),
+    ringMid: Color(0xFFC2410C),
+    ringDark: Color(0xFF7C2D12),
+    hands: Color(0xFFFFFFFF),
+    numbers: Color(0xFFF5F5F4),
+    numbersQuarter: Color(0xFFFDBA74),
+    brand: Color(0xFFB6BEC8),
+    tick: Color(0xFFF5F5F4),
+    winBg: Color(0xFFFFFFFF),
+    winBorder: Color(0xFFF5F5F4),
+    winText: Color(0xFFFFFFFF),
+    second: Color(0xFFC2410C),
+    hub: Color(0xFF171B20),
+    sparkA: Color(0xFFC2410C),
+    sparkB: Color(0xFFFDBA74),
+    sparkC: Color(0xFF7C2D12),
+    halo: Color(0xFFC2410C),
+  ),
+  AppThemeId.bosque: ClockPalette(
+    faceFrom: Color(0xFF1E3A2C),
+    faceTo: Color(0xFF0F1F18),
+    ringLight: Color(0xFFE9DFC7),
+    ringMid: Color(0xFFBEF264),
+    ringDark: Color(0xFF4D7C0F),
+    hands: Color(0xFFECF3EE),
+    numbers: Color(0xFFE9DFC7),
+    numbersQuarter: Color(0xFFBEF264),
+    brand: Color(0xFF9DB5A8),
+    tick: Color(0xFFE9DFC7),
+    winBg: Color(0xFFECF3EE),
+    winBorder: Color(0xFFE9DFC7),
+    winText: Color(0xFFECF3EE),
+    second: Color(0xFFBEF264),
+    hub: Color(0xFF0F1F18),
+    sparkA: Color(0xFFBEF264),
+    sparkB: Color(0xFFE9DFC7),
+    sparkC: Color(0xFF4D7C0F),
+    halo: Color(0xFFBEF264),
+  ),
+};
+
+ClockPalette clockPalette(AppThemeId id) => clockPalettes[id]!;
+
+/// "0 de 1 lista" / "2 de 4 listas".
+String taskCountLabel(int done, int total) =>
+    '$done de $total lista${total == 1 ? '' : 's'}';
+
 /// Fecha de cabecera ("Sábado, 10 de octubre"). En Medianoche va en
 /// mayúsculas mono ("SÁB 10 OCT") y se pinta con [AppTheme.fontMono].
 String headerDateString(DateTime date, AppTheme theme) {

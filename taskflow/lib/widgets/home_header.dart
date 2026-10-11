@@ -2,13 +2,23 @@ import 'package:flutter/material.dart';
 import '../app_themes.dart';
 import '../constants.dart';
 import '../models/task.dart';
+import 'entrance.dart';
 
 /// Cabecera sin AppBar: fecha + título a la izquierda, botón de ajustes redondo.
+/// En Grafito, una línea de acento se dibuja bajo el título al entrar.
 class HomeHeader extends StatelessWidget {
   final DateTime now;
   final VoidCallback onSettings;
+  final TickerProvider vsync;
+  final bool paused;
 
-  const HomeHeader({super.key, required this.now, required this.onSettings});
+  const HomeHeader({
+    super.key,
+    required this.now,
+    required this.onSettings,
+    required this.vsync,
+    this.paused = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -20,23 +30,31 @@ class HomeHeader extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: theme.muted,
     );
+    final titleStyle = TextStyle(
+      fontFamily: theme.fontDisplay,
+      fontSize: theme.titleSize,
+      fontWeight: FontWeight.w800,
+      height: 1.05,
+      color: theme.text,
+    );
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(headerDateString(now, theme), style: dateStyle),
-              Text(
-                title,
-                style: TextStyle(
-                  fontFamily: theme.fontDisplay,
-                  fontSize: theme.titleSize,
-                  fontWeight: FontWeight.w800,
-                  height: 1.05,
-                  color: theme.text,
+              const SizedBox(height: 2),
+              Text(title, style: titleStyle),
+              if (theme.id == AppThemeId.grafito)
+                _HoyUnderline(
+                  title: title,
+                  style: titleStyle,
+                  color: theme.accent,
+                  vsync: vsync,
+                  paused: paused,
                 ),
-              ),
             ],
           ),
         ),
@@ -50,7 +68,12 @@ class HomeHeader extends StatelessWidget {
               color: theme.card,
               border: Border.all(color: theme.border, width: 1),
             ),
-            child: Icon(Icons.tune, size: 24, color: theme.text),
+            child: Center(
+              child: CustomPaint(
+                size: const Size(22, 22),
+                painter: _SlidersPainter(color: theme.text),
+              ),
+            ),
           ),
         ),
       ],
@@ -58,17 +81,140 @@ class HomeHeader extends StatelessWidget {
   }
 }
 
+/// Icono de ajustes del HTML (dos líneas con círculos), 22x22, trazo 2.
+class _SlidersPainter extends CustomPainter {
+  final Color color;
+
+  _SlidersPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // viewBox 24x24 escalado a 22.
+    final s = size.width / 24;
+    canvas.save();
+    canvas.scale(s);
+    final p = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(const Offset(4, 7), const Offset(14, 7), p);
+    canvas.drawLine(const Offset(18, 7), const Offset(20, 7), p);
+    canvas.drawLine(const Offset(4, 17), const Offset(6, 17), p);
+    canvas.drawLine(const Offset(10, 17), const Offset(20, 17), p);
+    canvas.drawCircle(const Offset(16, 7), 2, p);
+    canvas.drawCircle(const Offset(8, 17), 2, p);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SlidersPainter old) => old.color != color;
+}
+
+/// Línea de acento bajo el título (Grafito): se dibuja al entrar.
+class _HoyUnderline extends StatefulWidget {
+  final String title;
+  final TextStyle style;
+  final Color color;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const _HoyUnderline({
+    required this.title,
+    required this.style,
+    required this.color,
+    required this.vsync,
+    required this.paused,
+  });
+
+  @override
+  State<_HoyUnderline> createState() => _HoyUnderlineState();
+}
+
+class _HoyUnderlineState extends State<_HoyUnderline> {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 450),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _controller.value = 1;
+    } else {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted) _controller.forward();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(_HoyUnderline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused) {
+      if (widget.paused) {
+        _controller.stop();
+      } else if (!MediaQuery.of(context).disableAnimations) {
+        _controller.forward();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final painter = TextPainter(
+      text: TextSpan(text: widget.title, style: widget.style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final t = Curves.easeOutCubic.transform(_controller.value);
+          return Container(
+            margin: const EdgeInsets.only(top: 4),
+            height: 3,
+            width: painter.width * t,
+            decoration: BoxDecoration(
+              color: widget.color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 /// Franja de 7 chips iguales siempre visibles; filtra por día.
+/// Los chips entran de izquierda a derecha con 40 ms de diferencia.
 class WeekStripCustom extends StatelessWidget {
   final DateTime now;
   final int? selected;
   final ValueChanged<int?> onSelect;
+  final TickerProvider vsync;
+  final bool paused;
 
   const WeekStripCustom({
     super.key,
     required this.now,
     required this.selected,
     required this.onSelect,
+    required this.vsync,
+    this.paused = false,
   });
 
   @override
@@ -79,53 +225,158 @@ class WeekStripCustom extends StatelessWidget {
       children: [
         for (int i = 0; i < 7; i++) ...[
           if (i > 0) const SizedBox(width: 6),
-          Expanded(child: _dayChip(context, theme, monday.add(Duration(days: i)))),
+          Expanded(
+            child: StaggeredEntrance(
+              index: i,
+              stepMs: 40,
+              slideHorizontal: theme.id == AppThemeId.grafito,
+              durationMs: theme.id == AppThemeId.grafito ? 250 : 450,
+              vsync: vsync,
+              child: _DayChip(
+                index: i,
+                now: now,
+                day: monday.add(Duration(days: i)),
+                selected: selected,
+                onSelect: onSelect,
+                vsync: vsync,
+                paused: paused,
+              ),
+            ),
+          ),
         ],
       ],
     );
   }
 
-  Widget _dayChip(BuildContext context, AppTheme theme, DateTime day) {
-    final isToday = day.year == now.year && day.month == now.month && day.day == now.day;
-    final isSelected = selected == day.weekday;
-    final filled = isToday;
+}
+
+/// Chip de día con pulso de entrada si es hoy (punto 2).
+class _DayChip extends StatefulWidget {
+  final int index;
+  final DateTime now;
+  final DateTime day;
+  final int? selected;
+  final ValueChanged<int?> onSelect;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const _DayChip({
+    required this.index,
+    required this.now,
+    required this.day,
+    required this.selected,
+    required this.onSelect,
+    required this.vsync,
+    required this.paused,
+  });
+
+  @override
+  State<_DayChip> createState() => _DayChipState();
+}
+
+class _DayChipState extends State<_DayChip> {
+  late final AnimationController _pulse;
+
+  bool get _isToday =>
+      widget.day.year == widget.now.year &&
+      widget.day.month == widget.now.month &&
+      widget.day.day == widget.now.day;
+
+  bool _scheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 400),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations || !_isToday) {
+      _pulse.value = 1;
+      return;
+    }
+    if (!_scheduled) {
+      _scheduled = true;
+      // Tras su propia entrada (40 ms por chip + 450 ms de animación).
+      Future.delayed(Duration(milliseconds: widget.index * 40 + 450), () {
+        if (mounted) _pulse.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    final isSelected = widget.selected == widget.day.weekday;
+    final filled = _isToday;
     final textColor = filled ? theme.onAccent : theme.text;
+    final pulse = _isToday
+        ? TweenSequence<double>([
+            TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.12), weight: 50),
+            TweenSequenceItem(tween: Tween(begin: 1.12, end: 1.0), weight: 50),
+          ]).animate(
+            CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+          )
+        : const AlwaysStoppedAnimation(1.0);
     return GestureDetector(
-      onTap: () => onSelect(isSelected ? null : day.weekday),
-      child: Container(
-        height: 64,
-        decoration: BoxDecoration(
-          color: filled ? theme.accent : theme.chipBg,
-          borderRadius: BorderRadius.circular(theme.chipRadius),
-          border: Border.all(
-            color: filled
-                ? theme.accent
-                : (isSelected ? theme.accent : (theme.chipBorder ?? Colors.transparent)),
-            width: isSelected && !filled ? 2 : 1,
+      onTap: () => widget.onSelect(isSelected ? null : widget.day.weekday),
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: pulse,
+          builder: (context, child) => Transform.scale(
+            scale: pulse.value,
+            child: child,
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              kDayNames[day.weekday - 1][0],
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: filled ? theme.onAccent : theme.chipLetter,
+          child: Container(
+            height: 64,
+            decoration: BoxDecoration(
+              color: filled ? theme.accent : theme.chipBg,
+              borderRadius: BorderRadius.circular(theme.chipRadius),
+              border: Border.all(
+                color: filled
+                    ? theme.accent
+                    : (isSelected
+                        ? theme.accent
+                        : (theme.chipBorder ?? Colors.transparent)),
+                width: isSelected && !filled ? 2 : 1,
               ),
             ),
-            Text(
-              '${day.day}',
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-              ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  kDayNames[widget.day.weekday - 1][0],
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: filled ? theme.onAccent : theme.chipLetter,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.day.day}',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -229,12 +480,19 @@ class NextAlarmCardCustom extends StatelessWidget {
   }
 }
 
-/// Tarjeta de tarea (el desliz para borrar lo pone el padre con Dismissible).
-class TaskCardCustom extends StatelessWidget {
+/// Tarjeta de tarea (el desliz para borrar lo pone el padre).
+/// Al marcar: el círculo se llena (escala 0.8→1.0 en 200 ms), el check se
+/// dibuja trazo a trazo (250 ms) y el título se tacha de izquierda a derecha.
+class TaskCardCustom extends StatefulWidget {
   final Task task;
   final bool done;
   final VoidCallback onTap;
   final VoidCallback onToggle;
+  final TickerProvider vsync;
+  final bool paused;
+
+  /// Entrada deslizándose desde arriba (solo al añadir).
+  final bool freshEntry;
 
   const TaskCardCustom({
     super.key,
@@ -242,23 +500,116 @@ class TaskCardCustom extends StatelessWidget {
     required this.done,
     required this.onTap,
     required this.onToggle,
+    required this.vsync,
+    this.paused = false,
+    this.freshEntry = false,
   });
+
+  @override
+  State<TaskCardCustom> createState() => _TaskCardCustomState();
+}
+
+class _TaskCardCustomState extends State<TaskCardCustom> {
+  late final AnimationController _controller;
+  late final AnimationController _entry;
+  late bool _shownDone;
+  bool _entryPlayed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownDone = widget.done;
+    _controller = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 250),
+      value: _shownDone ? 1 : 0,
+    );
+    _controller.addStatusListener((_) {
+      if (mounted) setState(() {});
+    });
+    _entry = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 350),
+      value: 1,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations) {
+      _controller.value = _shownDone ? 1 : 0;
+    }
+    if (widget.freshEntry && !_entryPlayed) {
+      _entryPlayed = true;
+      if (MediaQuery.of(context).disableAnimations) {
+        _entry.value = 1;
+      } else {
+        _entry.value = 0;
+        _entry.forward();
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(TaskCardCustom oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.done != _shownDone) {
+      _shownDone = widget.done;
+      _applyTarget();
+    } else if (oldWidget.paused != widget.paused) {
+      _applyTarget();
+    }
+  }
+
+  void _applyTarget() {
+    if (MediaQuery.of(context).disableAnimations) {
+      _controller.value = _shownDone ? 1 : 0;
+      return;
+    }
+    if (widget.paused) {
+      _controller.stop();
+      return;
+    }
+    if (_shownDone) {
+      _controller.forward();
+    } else {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _entry.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
     final time =
-        TimeOfDay(hour: task.hour, minute: task.minute).format(context);
-    final titleStyle = TextStyle(
-      fontFamily: theme.fontDisplay,
-      fontSize: 16,
-      fontWeight: FontWeight.w800,
-      color: done ? theme.muted : theme.text,
-      decoration: done ? TextDecoration.lineThrough : null,
-    );
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+        TimeOfDay(hour: widget.task.hour, minute: widget.task.minute)
+            .format(context);
+    final baseColor = _shownDone ? theme.muted : theme.text;
+    // Tachado real solo al final (el barrido lo dibuja el painter).
+    final doneDecoration = (_shownDone && _controller.isCompleted)
+        ? TextDecoration.lineThrough
+        : null;
+    return AnimatedBuilder(
+      animation: _entry,
+      builder: (context, child) {
+        final t = Curves.easeOutCubic.transform(_entry.value);
+        return RepaintBoundary(
+          child: Transform.translate(
+            offset: Offset(0, -24 * (1 - t)),
+            child: Opacity(opacity: t, child: child),
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: theme.card,
@@ -268,24 +619,45 @@ class TaskCardCustom extends StatelessWidget {
         child: Row(
           children: [
             GestureDetector(
-              key: ValueKey('check-${task.id}'),
-              onTap: onToggle,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: theme.checkRadius == null ? BoxShape.circle : BoxShape.rectangle,
-                  borderRadius: theme.checkRadius == null
-                      ? null
-                      : BorderRadius.circular(theme.checkRadius!),
-                  color: done ? theme.checkDone : Colors.transparent,
-                  border: done
-                      ? null
-                      : Border.all(color: theme.checkEmpty, width: 2),
+              key: ValueKey('check-${widget.task.id}'),
+              onTap: widget.onToggle,
+              child: RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    final t = _controller.value;
+                    final fillT =
+                        Curves.easeOut.transform((t / 0.8).clamp(0.0, 1.0));
+                    return Transform.scale(
+                      scale: 0.8 + 0.2 * fillT,
+                        child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          shape: theme.checkRadius == null
+                              ? BoxShape.circle
+                              : BoxShape.rectangle,
+                          borderRadius: theme.checkRadius == null
+                              ? null
+                              : BorderRadius.circular(theme.checkRadius!),
+                          color: t > 0
+                              ? theme.checkDone.withValues(alpha: t)
+                              : Colors.transparent,
+                          border: t > 0
+                              ? null
+                              : Border.all(color: theme.checkEmpty, width: 2),
+                        ),
+                        child: t > 0
+                            ? CustomPaint(
+                                painter: _CheckPainter(
+                                    progress: t, color: theme.checkIcon),
+                                size: const Size(24, 24),
+                              )
+                            : null,
+                      ),
+                    );
+                  },
                 ),
-                child: done
-                    ? Icon(Icons.check, size: 24, color: theme.checkIcon)
-                    : null,
               ),
             ),
             const SizedBox(width: 14),
@@ -293,9 +665,31 @@ class TaskCardCustom extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(task.title, style: titleStyle),
+                  Stack(
+                    children: [
                   Text(
-                    _formatDays(task.weekdays),
+                    widget.task.title,
+                    style: TextStyle(
+                      fontFamily: theme.fontDisplay,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: baseColor,
+                      decoration: doneDecoration,
+                    ),
+                  ),
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _StrikePainter(
+                            progress: _controller.value,
+                            color: baseColor,
+                            repaint: _controller,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    _formatDays(widget.task.weekdays),
                     style: TextStyle(
                       fontFamily: theme.fontBody,
                       fontSize: 13,
@@ -305,18 +699,32 @@ class TaskCardCustom extends StatelessWidget {
                 ],
               ),
             ),
-            Text(
-              time,
-              style: TextStyle(
-                fontFamily: theme.fontMono ?? theme.fontDisplay,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: done ? theme.muted : theme.text,
-                decoration: done ? TextDecoration.lineThrough : null,
-              ),
+              Stack(
+              children: [
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontFamily: theme.fontMono ?? theme.fontDisplay,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: baseColor,
+                    decoration: doneDecoration,
+                  ),
+                ),
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _StrikePainter(
+                      progress: _controller.value,
+                      color: baseColor,
+                      repaint: _controller,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -327,50 +735,279 @@ class TaskCardCustom extends StatelessWidget {
   }
 }
 
-/// Botón "Nueva tarea" de ancho completo.
-class NewTaskButton extends StatelessWidget {
-  final VoidCallback onTap;
+/// Check dibujado trazo a trazo según [progress] (0 a 1).
+class _CheckPainter extends CustomPainter {
+  final double progress;
+  final Color color;
 
-  const NewTaskButton({super.key, required this.onTap});
+  _CheckPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    final path = Path()
+      ..moveTo(size.width * 0.25, size.height * 0.52)
+      ..lineTo(size.width * 0.45, size.height * 0.70)
+      ..lineTo(size.width * 0.75, size.height * 0.32);
+    final metrics = path.computeMetrics().first;
+    final drawn =
+        metrics.extractPath(0, metrics.length * progress.clamp(0.0, 1.0));
+    canvas.drawPath(
+      drawn,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CheckPainter old) =>
+      old.progress != progress || old.color != color;
+}
+
+/// Línea de tachado que avanza de izquierda a derecha.
+class _StrikePainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _StrikePainter(
+      {required this.progress, required this.color, required Listenable repaint})
+      : super(repaint: repaint);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width * progress.clamp(0.0, 1.0), size.height / 2),
+      Paint()
+        ..color = color
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_StrikePainter old) =>
+      old.progress != progress || old.color != color;
+}
+
+/// Botón "Nueva tarea" de ancho completo con respiración suave
+/// (escala 1.0 a 1.02 en 2.4 s, en bucle).
+class NewTaskButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const NewTaskButton({
+    super.key,
+    required this.onTap,
+    required this.vsync,
+    this.paused = false,
+  });
+
+  @override
+  State<NewTaskButton> createState() => _NewTaskButtonState();
+}
+
+class _NewTaskButtonState extends State<NewTaskButton> {
+  late final AnimationController _breathe;
+
+  @override
+  void initState() {
+    super.initState();
+    _breathe = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 2400),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _applyLoop();
+  }
+
+  @override
+  void didUpdateWidget(NewTaskButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused) _applyLoop();
+  }
+
+  void _applyLoop() {
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _breathe.stop();
+      _breathe.value = 0;
+    } else if (!_breathe.isAnimating) {
+      _breathe.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _breathe.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        height: 56,
-        decoration: BoxDecoration(
-          color: theme.accent,
-          borderRadius: BorderRadius.circular(theme.buttonRadius),
-          boxShadow: [
-            BoxShadow(
-              color: theme.accent.withValues(alpha: 0.22),
-              offset: const Offset(0, 8),
-              blurRadius: 24,
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _breathe,
+        builder: (context, child) {
+          final t = Curves.easeInOut.transform(_breathe.value);
+          return Transform.scale(scale: 1.0 + 0.02 * t, child: child);
+        },
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              color: theme.accent,
+              borderRadius: BorderRadius.circular(theme.buttonRadius),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.accent.withValues(alpha: 0.28),
+                  offset: const Offset(0, 8),
+                  blurRadius: 20,
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add, size: 20, color: theme.onAccent),
-            const SizedBox(width: 8),
-            Text(
-              'Nueva tarea',
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: theme.onAccent,
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add, size: 20, color: theme.onAccent),
+                const SizedBox(width: 8),
+                Text(
+                  'Añadir tarea',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: theme.onAccent,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// Tarjeta vacía "Sin tareas / Crea tu primera tarea", copia del HTML.
+class EmptyNextAlarmCard extends StatelessWidget {
+  const EmptyNextAlarmCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.nextBg,
+        borderRadius: BorderRadius.circular(theme.bigCardRadius),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'SIGUIENTE ALARMA',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.96,
+                    color: theme.nextLabel,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Sin tareas',
+                  style: TextStyle(
+                    fontFamily: theme.fontDisplay,
+                    fontSize: 40,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                    color: theme.nextText,
+                  ),
+                ),
+                Text(
+                  'Crea tu primera tarea',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: theme.nextText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.nextCircle,
+            ),
+            child: Center(
+              child: CustomPaint(
+                size: const Size(30, 30),
+                painter: _BellPainter(color: theme.nextCircleIcon),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Campana del HTML (30x30, trazo 2).
+class _BellPainter extends CustomPainter {
+  final Color color;
+
+  _BellPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // viewBox 24x24 escalado a 30.
+    final s = size.width / 24;
+    canvas.save();
+    canvas.scale(s);
+    final p = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    final bell = Path()
+      ..moveTo(6, 17)
+      ..lineTo(6, 11)
+      ..cubicTo(6, 7.13, 8.69, 5, 12, 5)
+      ..cubicTo(15.31, 5, 18, 7.13, 18, 11)
+      ..lineTo(18, 17)
+      ..lineTo(19.5, 19)
+      ..lineTo(4.5, 19)
+      ..close();
+    canvas.drawPath(bell, p);
+    canvas.drawLine(const Offset(10, 21), const Offset(14, 21), p);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_BellPainter old) => old.color != color;
 }
 
 /// Barra propia de Deshacer (sin SnackBar).
@@ -415,6 +1052,143 @@ class UndoBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Desliz para borrar propio: arrastra a la izquierda; al soltar pasado el
+/// umbral se encoge y se desvanece en 200 ms y luego avisa con [onDelete].
+class SwipeDelete extends StatefulWidget {
+  final Widget child;
+  final Widget background;
+  final VoidCallback onDelete;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const SwipeDelete({
+    super.key,
+    required this.child,
+    required this.background,
+    required this.onDelete,
+    required this.vsync,
+    this.paused = false,
+  });
+
+  @override
+  State<SwipeDelete> createState() => _SwipeDeleteState();
+}
+
+class _SwipeDeleteState extends State<SwipeDelete> {
+  double _dragX = 0;
+  bool _collapsing = false;
+  late final AnimationController _collapse;
+  late final AnimationController _springBack;
+
+  @override
+  void initState() {
+    super.initState();
+    _collapse = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 200),
+    );
+    _springBack = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 150),
+    );
+  }
+
+  @override
+  void dispose() {
+    _collapse.dispose();
+    _springBack.dispose();
+    super.dispose();
+  }
+
+  void _onUpdate(DragUpdateDetails details, double width) {
+    if (_collapsing) return;
+    setState(() {
+      _dragX = (_dragX + details.delta.dx).clamp(-width, 0.0);
+    });
+  }
+
+  void _onEnd(double width) {
+    if (_collapsing) return;
+    final threshold = width * 0.4;
+    if (-_dragX >= threshold) {
+      _collapsing = true;
+      if (MediaQuery.of(context).disableAnimations || widget.paused) {
+        widget.onDelete();
+        return;
+      }
+      _collapse.forward().whenComplete(() {
+        if (mounted) widget.onDelete();
+      });
+      setState(() {});
+    } else {
+      _returnBack();
+    }
+  }
+
+  Animation<double>? _backAnim;
+
+  void _returnBack() {
+    final from = _dragX;
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _dragX = 0;
+      setState(() {});
+      return;
+    }
+    _backAnim = Tween<double>(begin: from, end: 0).animate(
+      CurvedAnimation(parent: _springBack, curve: Curves.easeOut),
+    );
+    _springBack.removeListener(_tickBack);
+    _springBack.addListener(_tickBack);
+    _springBack.forward(from: 0).whenComplete(() {
+      _springBack.removeListener(_tickBack);
+    });
+  }
+
+  void _tickBack() {
+    final anim = _backAnim;
+    if (!mounted || anim == null) return;
+    setState(() => _dragX = anim.value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return GestureDetector(
+          onHorizontalDragUpdate: (details) => _onUpdate(details, width),
+          onHorizontalDragEnd: (_) => _onEnd(width),
+          child: Stack(
+            children: [
+              Positioned.fill(child: widget.background),
+              AnimatedBuilder(
+                animation: _collapse,
+                builder: (context, child) {
+                  final t = _collapse.value;
+                  return ClipRect(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      heightFactor: (1 - t).clamp(0.0, 1.0),
+                      child: Opacity(
+                        opacity: 1 - t,
+                        child: Transform.translate(
+                          offset: Offset(_collapsing ? 0 : _dragX, 0),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                child: RepaintBoundary(child: widget.child),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

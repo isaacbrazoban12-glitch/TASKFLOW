@@ -11,7 +11,10 @@ import 'models/task.dart';
 import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
+import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
+import 'widgets/theme_decorations.dart';
+import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
 
@@ -84,7 +87,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
   List<Task> _tasks = [];
@@ -95,6 +99,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int? _filterWeekday;
   Task? _pendingDelete;
   Timer? _deleteTimer;
+  bool _firstLoadDone = false;
+  bool _animationsPaused = false;
+  int? _justAddedId;
 
   @override
   void initState() {
@@ -115,7 +122,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (_animationsPaused && mounted) {
+        setState(() => _animationsPaused = false);
+      }
       _onAppResumed();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (!_animationsPaused && mounted) {
+        setState(() => _animationsPaused = true);
+      }
     }
   }
 
@@ -510,6 +526,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _tasks = tasks;
         _isLoading = false;
       });
+      // La entrada en cascada solo corre en la primera carga.
+      if (!_firstLoadDone) {
+        Future.delayed(const Duration(milliseconds: 8 * 70 + 450), () {
+          if (mounted) setState(() => _firstLoadDone = true);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -525,6 +547,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       builder: (_) => TaskFormDialog(task: task),
     );
     if (result != null) {
+      if (task == null && result.id != null) {
+        setState(() => _justAddedId = result.id);
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) setState(() => _justAddedId = null);
+        });
+      }
       await _loadTasks();
     }
   }
@@ -643,17 +671,57 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildBody() {
     final now = DateTime.now();
+    final theme = AppThemeScope.of(context);
+    final horizontal = theme.id == AppThemeId.grafito;
+    final slideMs = horizontal ? 250 : 450;
+    StaggeredEntrance entrance(int index, Widget child, {bool bounce = false}) {
+      return StaggeredEntrance(
+        index: index,
+        durationMs: slideMs,
+        slideHorizontal: horizontal,
+        bounce: bounce,
+        vsync: this,
+        child: child,
+      );
+    }
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_tasks.isEmpty) {
       return Column(
         children: [
-          HomeHeader(now: now, onSettings: _openSettings),
+          entrance(
+              0,
+              HomeHeader(
+                  now: now, onSettings: _openSettings, vsync: this, paused: _animationsPaused)),
           const SizedBox(height: 20),
-          const Expanded(
+          entrance(
+            1,
+            WeekStripCustom(
+              now: now,
+              selected: _filterWeekday,
+              onSelect: (day) => setState(() => _filterWeekday = day),
+              vsync: this,
+              paused: _animationsPaused,
+            ),
+          ),
+          const SizedBox(height: 20),
+          entrance(2, const EmptyNextAlarmCard()),
+          Expanded(
             child: Center(
-              child: Text('Aún no tienes tareas.\nToca + para agregar una.'),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    VivoClock(vsync: this, paused: _animationsPaused),
+                    const SizedBox(height: 28),
+                    const ClockDigitalTime(),
+                    const SizedBox(height: 6),
+                    _EmptyHint(),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -665,21 +733,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final next = findNextAlarm(_tasks, now);
     final doneCount =
         _tasks.where((t) => t.isEffectivelyCompleted(now)).length;
+    final isMidnight = theme.id == AppThemeId.medianoche;
+    final nextCard = next == null
+        ? null
+        : NextAlarmCardCustom(task: next.task, when: next.when, now: now);
+    final nextChild = nextCard == null
+        ? null
+        : (isMidnight
+            ? BorderGlow(
+                radius: theme.bigCardRadius,
+                vsync: this,
+                paused: _animationsPaused,
+                child: nextCard,
+              )
+            : nextCard);
     return Column(
       children: [
-        HomeHeader(now: now, onSettings: _openSettings),
+        entrance(
+            0,
+            HomeHeader(
+                now: now,
+                onSettings: _openSettings,
+                vsync: this,
+                paused: _animationsPaused)),
         const SizedBox(height: 20),
         WeekStripCustom(
           now: now,
           selected: _filterWeekday,
           onSelect: (day) => setState(() => _filterWeekday = day),
+          vsync: this,
+          paused: _animationsPaused,
         ),
-        if (next != null) ...[
+        if (nextChild != null) ...[
           const SizedBox(height: 20),
-          NextAlarmCardCustom(task: next.task, when: next.when, now: now),
+          entrance(2, nextChild),
         ],
         const SizedBox(height: 20),
-        _TaskCountRow(done: doneCount, total: _tasks.length),
+        entrance(3, _TaskCountRow(done: doneCount, total: _tasks.length)),
         const SizedBox(height: 12),
         Expanded(
           child: visible.isEmpty
@@ -693,17 +783,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   itemBuilder: (context, index) {
                     final task = visible[index];
                     final done = task.isEffectivelyCompleted(DateTime.now());
-                    return Dismissible(
+                    final fresh = task.id != null && task.id == _justAddedId;
+                    final card = TaskCardCustom(
+                      key: ValueKey('card-${task.id}'),
+                      task: task,
+                      done: done,
+                      onTap: () => _openTaskDialog(task: task),
+                      onToggle: () => _toggleTask(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      freshEntry: fresh,
+                    );
+                    final swiped = SwipeDelete(
                       key: ValueKey('task-${task.id}'),
-                      direction: DismissDirection.endToStart,
                       background: _DismissBackground(),
-                      onDismissed: (_) => _requestDelete(task),
-                      child: TaskCardCustom(
-                        task: task,
-                        done: done,
-                        onTap: () => _openTaskDialog(task: task),
-                        onToggle: () => _toggleTask(task),
-                      ),
+                      onDelete: () => _requestDelete(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      child: card,
+                    );
+                    if (fresh) return swiped;
+                    // Entrada limitada a 8 x 70 ms y solo en la primera
+                    // carga: al desplazarse no se vuelve a animar.
+                    if (_firstLoadDone) return swiped;
+                    return StaggeredEntrance(
+                      index: (4 + index).clamp(0, 8),
+                      durationMs: slideMs,
+                      slideHorizontal: horizontal,
+                      vsync: this,
+                      child: swiped,
                     );
                   },
                 ),
@@ -724,32 +832,56 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: Scaffold(
         backgroundColor: theme.background,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              ..._buildPlatformNotice(),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _buildBody(),
-                ),
+              Positioned.fill(
+                child: ThemeDecorations(
+                    vsync: this, paused: _animationsPaused),
               ),
+              Column(
+                children: [
+                  ..._buildPlatformNotice(),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: _buildBody(),
+                    ),
+                  ),
               Padding(
                 padding: EdgeInsets.only(
                   left: 24,
                   right: 24,
                   bottom: 28 + MediaQuery.of(context).padding.bottom,
+                ), // Padding botón (el Stack se cierra abajo)
+
+                child: StaggeredEntrance(
+                  index: 4 + _tasks.length,
+                  bounce: true,
+                  slideHorizontal:
+                      AppThemeScope.of(context).id == AppThemeId.grafito,
+                  durationMs:
+                      AppThemeScope.of(context).id == AppThemeId.grafito
+                          ? 250
+                          : 450,
+                  vsync: this,
+                  child: NewTaskButton(
+                  onTap: () => _openTaskDialog(),
+                  vsync: this,
+                  paused: _animationsPaused,
                 ),
-                child: NewTaskButton(onTap: () => _openTaskDialog()),
+                ),
               ),
             ],
           ),
+        ],
+      ),
         ),
       ),
     );
   }
 }
 
-/// Fila "Tus tareas" + "X de Y listas".
+/// Fila "Tus tareas" + "X de Y lista(s)".
 class _TaskCountRow extends StatelessWidget {
   final int done;
   final int total;
@@ -773,7 +905,7 @@ class _TaskCountRow extends StatelessWidget {
           ),
         ),
         Text(
-          '$done de $total listas',
+          taskCountLabel(done, total),
           style: TextStyle(
             fontFamily: theme.fontBody,
             fontSize: 14,
@@ -782,6 +914,26 @@ class _TaskCountRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Texto bajo el reloj: "Aún no tienes tareas…".
+class _EmptyHint extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Text(
+        'Aún no tienes tareas. Toca Añadir tarea para crear tu primera alarma.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontFamily: theme.fontBody,
+          fontSize: 14,
+          color: theme.muted,
+        ),
+      ),
     );
   }
 }
