@@ -142,3 +142,7 @@ flutter:
           weight: 600
         - asset: assets/fonts/Archivo800.ttf
           weight: 800
+    - family: Playfair Display
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay700.ttf
+          weight: 700

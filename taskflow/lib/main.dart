@@ -11,9 +11,11 @@ import 'models/task.dart';
 import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
+import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
+import 'widgets/vivo_clock.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -84,7 +86,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
   List<Task> _tasks = [];
@@ -95,6 +98,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int? _filterWeekday;
   Task? _pendingDelete;
   Timer? _deleteTimer;
+  bool _firstLoadDone = false;
 
   @override
   void initState() {
@@ -510,6 +514,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _tasks = tasks;
         _isLoading = false;
       });
+      // La entrada en cascada solo corre en la primera carga.
+      if (!_firstLoadDone) {
+        Future.delayed(const Duration(milliseconds: 8 * 70 + 450), () {
+          if (mounted) setState(() => _firstLoadDone = true);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -651,9 +661,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         children: [
           HomeHeader(now: now, onSettings: _openSettings),
           const SizedBox(height: 20),
-          const Expanded(
+          WeekStripCustom(
+            now: now,
+            selected: _filterWeekday,
+            onSelect: (day) => setState(() => _filterWeekday = day),
+          ),
+          const SizedBox(height: 20),
+          const EmptyNextAlarmCard(),
+          Expanded(
             child: Center(
-              child: Text('Aún no tienes tareas.\nToca + para agregar una.'),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    VivoClock(vsync: this),
+                    const SizedBox(height: 28),
+                    const ClockDigitalTime(),
+                    const SizedBox(height: 6),
+                    _EmptyHint(),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -693,7 +721,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   itemBuilder: (context, index) {
                     final task = visible[index];
                     final done = task.isEffectivelyCompleted(DateTime.now());
-                    return Dismissible(
+                    final card = Dismissible(
                       key: ValueKey('task-${task.id}'),
                       direction: DismissDirection.endToStart,
                       background: _DismissBackground(),
@@ -704,6 +732,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         onTap: () => _openTaskDialog(task: task),
                         onToggle: () => _toggleTask(task),
                       ),
+                    );
+                    // Entrada limitada a 8 x 70 ms y solo en la primera
+                    // carga: al desplazarse no se vuelve a animar.
+                    if (_firstLoadDone) return card;
+                    return StaggeredEntrance(
+                      index: index.clamp(0, 8),
+                      vsync: this,
+                      child: card,
                     );
                   },
                 ),
@@ -749,7 +785,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-/// Fila "Tus tareas" + "X de Y listas".
+/// Fila "Tus tareas" + "X de Y lista(s)".
 class _TaskCountRow extends StatelessWidget {
   final int done;
   final int total;
@@ -773,7 +809,7 @@ class _TaskCountRow extends StatelessWidget {
           ),
         ),
         Text(
-          '$done de $total listas',
+          taskCountLabel(done, total),
           style: TextStyle(
             fontFamily: theme.fontBody,
             fontSize: 14,
@@ -782,6 +818,26 @@ class _TaskCountRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Texto bajo el reloj: "Aún no tienes tareas…".
+class _EmptyHint extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Text(
+        'Aún no tienes tareas. Toca Añadir tarea para crear tu primera alarma.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontFamily: theme.fontBody,
+          fontSize: 14,
+          color: theme.muted,
+        ),
+      ),
     );
   }
 }
