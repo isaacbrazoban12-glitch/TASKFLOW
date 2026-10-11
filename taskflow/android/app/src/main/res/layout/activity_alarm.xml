@@ -8,12 +8,14 @@
     android:paddingLeft="24dp"
     android:paddingRight="24dp"
     android:paddingBottom="40dp"
+    android:clipChildren="false"
     android:background="@drawable/alarm_gradient_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
+        android:clipChildren="false"
         android:gravity="center_horizontal">
 
         <TextView
@@ -41,11 +43,35 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="vertical"
+        android:clipChildren="false"
         android:gravity="center">
 
         <FrameLayout
-            android:layout_width="176dp"
-            android:layout_height="176dp">
+            android:layout_width="260dp"
+            android:layout_height="260dp"
+            android:clipChildren="false"
+            android:clipToPadding="false">
+
+            <View
+                android:id="@+id/wave1"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
+
+            <View
+                android:id="@+id/wave2"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
+
+            <View
+                android:id="@+id/wave3"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
 
             <View
                 android:id="@+id/circleOuter"
@@ -66,7 +92,7 @@
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:layout_gravity="center"
-                android:src="@android:drawable/ic_lock_idle_alarm"
+                android:src="@drawable/ic_bell"
                 android:contentDescription="Alarma" />
         </FrameLayout>
 
@@ -105,6 +131,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipChildren="false"
         android:orientation="vertical">
 
         <Button
@@ -116,10 +143,9 @@
             android:textSize="18sp"
             android:textStyle="bold"
             android:textColor="#FFFFFF"
-            android:drawableStart="@android:drawable/ic_menu_send"
+            android:drawableStart="@drawable/ic_check"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
-            android:backgroundTint="#2E7D32"
             android:gravity="center" />
 
         <Button
@@ -131,10 +157,9 @@
             android:textAllCaps="false"
             android:textSize="16sp"
             android:textColor="#FFFFFF"
-            android:drawableStart="@android:drawable/ic_lock_idle_alarm"
+            android:drawableStart="@drawable/ic_snooze"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
-            android:backgroundTint="#80FFFFFF"
             android:gravity="center" />
     </LinearLayout>
 
