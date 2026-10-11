@@ -53,6 +53,27 @@
             android:clipToPadding="false">
 
             <View
+                android:id="@+id/wave1"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
+
+            <View
+                android:id="@+id/wave2"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
+
+            <View
+                android:id="@+id/wave3"
+                android:layout_width="176dp"
+                android:layout_height="176dp"
+                android:layout_gravity="center"
+                android:background="@drawable/alarm_circle" />
+
+            <View
                 android:id="@+id/circleOuter"
                 android:layout_width="176dp"
                 android:layout_height="176dp"

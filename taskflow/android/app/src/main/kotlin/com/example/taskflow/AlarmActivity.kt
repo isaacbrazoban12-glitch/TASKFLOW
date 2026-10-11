@@ -43,11 +43,10 @@ class AlarmActivity : AppCompatActivity() {
     private var vibrator: Vibrator? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeTicker: Runnable? = null
-    private var bellAnimator: ObjectAnimator? = null
-    private var haloAnimator: AnimatorSet? = null
     private val animHandler = Handler(Looper.getMainLooper())
     private var bellRestart: Runnable? = null
-    private var animationsRunning = false
+    private var alarmAnimationsRunning = false
+    private val alarmAnimators = mutableListOf<Animator>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,7 +105,7 @@ class AlarmActivity : AppCompatActivity() {
 
         applyTheme(ThemeHelper.currentTheme(this))
         startAlarmSoundAndVibration()
-        startBellAndHalo()
+        startAlarmAnimation()
     }
 
     /**
@@ -133,6 +132,10 @@ class AlarmActivity : AppCompatActivity() {
             ColorStateList.valueOf((theme.accent and 0x00FFFFFF) or 0x2E000000)
         findViewById<View>(R.id.circleInner).backgroundTintList =
             ColorStateList.valueOf(theme.accent)
+        for (waveId in intArrayOf(R.id.wave1, R.id.wave2, R.id.wave3)) {
+            findViewById<View>(waveId).backgroundTintList =
+                ColorStateList.valueOf(theme.accent)
+        }
         findViewById<ImageView>(R.id.alarmIcon).setColorFilter(theme.onAccent)
 
         findViewById<TextView>(R.id.tvTime).apply {
@@ -173,10 +176,12 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     /**
-     * Campana con balanceo de péndulo (pivote arriba al centro): gira de
-     * -14° a +14° en 0,9 s con ease-in-out, repite 3 ciclos y descansa 1,2 s,
-     * en bucle mientras la alarma suena. El halo exterior late entre escala
-     * 1.0-1.12 y opacidad 0.18-0.06 en ciclos de 1,6 s.
+     * Animación de alarma: campana con sacudida tipo timbre (rotación de
+     * -22° a +22°, 90 ms por medio-ciclo, 12 medio-ciclos con escala 1.0-1.12
+     * sincronizada y pivote arriba al centro; pausa de 350 ms y repite),
+     * 3 ondas que se expanden (escala 1.0-1.8, alfa 0.35-0, 1,2 s,
+     * escalonadas 400 ms), halo que late (1.0-1.15 y alfa 1.0-0.5, 500 ms) y
+     * hora que pulsa (1.0-1.04, 500 ms) sincronizada con el halo.
      * Sin animaciones si ANIMATOR_DURATION_SCALE = 0.
      */
     private fun animationsDisabled(): Boolean {
@@ -191,75 +196,180 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
-    private fun startBellAndHalo() {
+    private fun track(animator: Animator): Animator {
+        alarmAnimators.add(animator)
+        return animator
+    }
+
+    private fun startAlarmAnimation() {
         if (animationsDisabled()) return
-        animationsRunning = true
+        alarmAnimationsRunning = true
         val bell = findViewById<ImageView>(R.id.alarmIcon)
         val halo = findViewById<View>(R.id.circleOuter)
+        val tvTime = findViewById<TextView>(R.id.tvTime)
+        val waves = listOf(
+            findViewById<View>(R.id.wave1),
+            findViewById<View>(R.id.wave2),
+            findViewById<View>(R.id.wave3)
+        )
+        val hardwareViews = listOf<View>(bell, halo, tvTime) + waves
+        for (v in hardwareViews) {
+            try {
+                v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            } catch (_: Exception) {
+            }
+        }
         bell.post {
-            if (!animationsRunning) return@post
+            if (!alarmAnimationsRunning) return@post
             bell.pivotX = bell.width / 2f
             bell.pivotY = 0f
-            runBellCycle(bell)
+            runBellBurst(bell)
         }
-        val scaleX = ObjectAnimator.ofFloat(halo, View.SCALE_X, 1f, 1.12f).apply {
-            duration = 1600
+        for ((index, wave) in waves.withIndex()) {
+            wave.alpha = 0.35f
+            wave.scaleX = 1f
+            wave.scaleY = 1f
+            val scaleX = ObjectAnimator.ofFloat(wave, View.SCALE_X, 1f, 1.8f).apply {
+                duration = 1200
+                interpolator = AccelerateDecelerateInterpolator()
+                repeatMode = ObjectAnimator.RESTART
+                repeatCount = ObjectAnimator.INFINITE
+                startDelay = (index * 400).toLong()
+            }
+            val scaleY = ObjectAnimator.ofFloat(wave, View.SCALE_Y, 1f, 1.8f).apply {
+                duration = 1200
+                interpolator = AccelerateDecelerateInterpolator()
+                repeatMode = ObjectAnimator.RESTART
+                repeatCount = ObjectAnimator.INFINITE
+                startDelay = (index * 400).toLong()
+            }
+            val fade = ObjectAnimator.ofFloat(wave, View.ALPHA, 0.35f, 0f).apply {
+                duration = 1200
+                interpolator = AccelerateDecelerateInterpolator()
+                repeatMode = ObjectAnimator.RESTART
+                repeatCount = ObjectAnimator.INFINITE
+                startDelay = (index * 400).toLong()
+            }
+            (track(AnimatorSet().apply {
+                playTogether(scaleX, scaleY, fade)
+            }) as AnimatorSet).start()
+        }
+        val haloScaleX = ObjectAnimator.ofFloat(halo, View.SCALE_X, 1f, 1.15f).apply {
+            duration = 500
             interpolator = AccelerateDecelerateInterpolator()
             repeatMode = ObjectAnimator.REVERSE
             repeatCount = ObjectAnimator.INFINITE
         }
-        val scaleY = ObjectAnimator.ofFloat(halo, View.SCALE_Y, 1f, 1.12f).apply {
-            duration = 1600
+        val haloScaleY = ObjectAnimator.ofFloat(halo, View.SCALE_Y, 1f, 1.15f).apply {
+            duration = 500
             interpolator = AccelerateDecelerateInterpolator()
             repeatMode = ObjectAnimator.REVERSE
             repeatCount = ObjectAnimator.INFINITE
         }
-        val fade = ObjectAnimator.ofFloat(halo, View.ALPHA, 1f, 0.33f).apply {
-            duration = 1600
+        val haloFade = ObjectAnimator.ofFloat(halo, View.ALPHA, 1f, 0.5f).apply {
+            duration = 500
             interpolator = AccelerateDecelerateInterpolator()
             repeatMode = ObjectAnimator.REVERSE
             repeatCount = ObjectAnimator.INFINITE
         }
-        haloAnimator = AnimatorSet().apply {
-            playTogether(scaleX, scaleY, fade)
-            start()
+        val timeScaleX = ObjectAnimator.ofFloat(tvTime, View.SCALE_X, 1f, 1.04f).apply {
+            duration = 500
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
         }
+        val timeScaleY = ObjectAnimator.ofFloat(tvTime, View.SCALE_Y, 1f, 1.04f).apply {
+            duration = 500
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
+        }
+        (track(AnimatorSet().apply {
+            playTogether(haloScaleX, haloScaleY, haloFade, timeScaleX, timeScaleY)
+        }) as AnimatorSet).start()
     }
 
-    private fun runBellCycle(bell: ImageView) {
-        if (!animationsRunning || animationsDisabled()) return
-        bellAnimator?.cancel()
-        bellAnimator = ObjectAnimator.ofFloat(bell, View.ROTATION, -14f, 14f).apply {
-            duration = 900
+    private fun runBellBurst(bell: ImageView) {
+        if (!alarmAnimationsRunning || animationsDisabled()) return
+        val shake = ObjectAnimator.ofFloat(bell, View.ROTATION, -22f, 22f).apply {
+            duration = 90
             interpolator = AccelerateDecelerateInterpolator()
             repeatMode = ObjectAnimator.REVERSE
-            repeatCount = 5
+            repeatCount = 11
+        }
+        val growX = ObjectAnimator.ofFloat(bell, View.SCALE_X, 1f, 1.12f).apply {
+            duration = 90
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = 11
+        }
+        val growY = ObjectAnimator.ofFloat(bell, View.SCALE_Y, 1f, 1.12f).apply {
+            duration = 90
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = 11
+        }
+        val burst = AnimatorSet().apply {
+            playTogether(shake, growX, growY)
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (!animationsRunning) return
+                    alarmAnimators.remove(animation)
+                    if (!alarmAnimationsRunning) return
                     bellRestart?.let { animHandler.removeCallbacks(it) }
-                    bellRestart = Runnable { runBellCycle(bell) }
-                    animHandler.postDelayed(bellRestart!!, 1200)
+                    bellRestart = Runnable { runBellBurst(bell) }
+                    animHandler.postDelayed(bellRestart!!, 350)
                 }
             })
-            start()
         }
+        track(burst)
+        burst.start()
     }
 
-    private fun stopBellAndHalo() {
-        animationsRunning = false
+    private fun stopAlarmAnimation() {
+        alarmAnimationsRunning = false
         bellRestart?.let { animHandler.removeCallbacks(it) }
         bellRestart = null
+        for (animator in alarmAnimators.toList()) {
+            try {
+                animator.cancel()
+            } catch (_: Exception) {
+            }
+        }
+        alarmAnimators.clear()
         try {
-            bellAnimator?.cancel()
+            val bell = findViewById<ImageView>(R.id.alarmIcon)
+            bell.rotation = 0f
+            bell.scaleX = 1f
+            bell.scaleY = 1f
+            val halo = findViewById<View>(R.id.circleOuter)
+            halo.scaleX = 1f
+            halo.scaleY = 1f
+            halo.alpha = 1f
+            val tvTime = findViewById<TextView>(R.id.tvTime)
+            tvTime.scaleX = 1f
+            tvTime.scaleY = 1f
+            for (waveId in intArrayOf(R.id.wave1, R.id.wave2, R.id.wave3)) {
+                val wave = findViewById<View>(waveId)
+                wave.scaleX = 1f
+                wave.scaleY = 1f
+                wave.alpha = 0f
+            }
+            val views = listOf<View>(
+                bell,
+                halo,
+                tvTime,
+                findViewById(R.id.wave1),
+                findViewById(R.id.wave2),
+                findViewById(R.id.wave3)
+            )
+            for (v in views) {
+                try {
+                    v.setLayerType(View.LAYER_TYPE_NONE, null)
+                } catch (_: Exception) {
+                }
+            }
         } catch (_: Exception) {
         }
-        bellAnimator = null
-        try {
-            haloAnimator?.cancel()
-        } catch (_: Exception) {
-        }
-        haloAnimator = null
     }
 
     private fun startAlarmSoundAndVibration() {
@@ -314,12 +424,12 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        stopBellAndHalo()
+        stopAlarmAnimation()
         super.onStop()
     }
 
     override fun onDestroy() {
-        stopBellAndHalo()
+        stopAlarmAnimation()
         timeTicker?.let { timeHandler.removeCallbacks(it) }
         timeTicker = null
         stopAlarmSoundAndVibration()
@@ -353,7 +463,7 @@ class AlarmActivity : AppCompatActivity() {
      * Dart aplica su parte después leyendo la acción pendiente guardada.
      */
     private fun finishWithAction(action: String) {
-        stopBellAndHalo()
+        stopAlarmAnimation()
         stopAlarmSoundAndVibration()
         if (taskId <= 0) {
             finish()
