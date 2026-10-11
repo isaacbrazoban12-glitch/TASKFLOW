@@ -13,8 +13,9 @@ import '../app_themes.dart';
 ///
 /// La hora, los segundos, AM/PM y el día salen de [DateTime.now()] y se
 /// actualizan con un [Ticker] continuo; el segundero se desliza sin saltos
-/// (usa milisegundos). Conserva las animaciones de entrada: esfera con
-/// rebote, números con pop escalonado y agujas que giran una vuelta.
+/// (usa milisegundos). Conserva la entrada (rebote de esfera, pop de números
+/// y vuelta de agujas), la flotación suave, la pausa en segundo plano y el
+/// modo sin animaciones.
 class VivoClock extends StatefulWidget {
   final double size;
   final TickerProvider vsync;
@@ -125,9 +126,16 @@ class _VivoClockState extends State<VivoClock> {
           );
           final faceScale = 0.85 + 0.15 * faceT;
           final entryT = Curves.easeOutCubic.transform(_entry.value);
-          return Transform.scale(
-            scale: faceScale,
-            child: SizedBox(
+          // Flotación suave: +-4 px en ciclos de 4 s (congelada sin
+          // animaciones o en pausa).
+          final frozen = _reducedMotion || widget.paused;
+          final floatY =
+              frozen ? 0.0 : math.sin(elapsedSec * 2 * math.pi / 4) * 4;
+          return Transform.translate(
+            offset: Offset(0, floatY),
+            child: Transform.scale(
+              scale: faceScale,
+              child: SizedBox(
               width: widget.size,
               height: widget.size,
               child: Stack(
@@ -194,6 +202,7 @@ class _VivoClockState extends State<VivoClock> {
                     ),
                   ),
                 ],
+              ),
               ),
             ),
           );

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Entrada en cascada: sube 16 px y aparece en 450 ms con easeOutCubic,
-/// empezando tras [index] * [stepMs] milisegundos (limitado a 8 x 70 ms).
-/// Solo debe usarse en la primera carga de la lista: el dueño (HomePage)
-/// deja de envolver con este widget al desplazarse ([_firstLoadDone]).
+/// empezando tras [index] * [stepMs] milisegundos.
 /// Con [bounce], entra con rebote (escala 0.9 a 1.0, easeOutBack).
 /// Con [slideHorizontal], el desliz es lateral rápido ([durationMs]) en vez de
 /// vertical (Grafito).
@@ -65,8 +63,7 @@ class _StaggeredEntranceState extends State<StaggeredEntrance> {
     }
     if (!_scheduled) {
       _scheduled = true;
-      final capped = widget.index.clamp(0, 8);
-      Future.delayed(Duration(milliseconds: capped * widget.stepMs), () {
+      Future.delayed(Duration(milliseconds: widget.index * widget.stepMs), () {
         if (mounted) _controller.forward();
       });
     }

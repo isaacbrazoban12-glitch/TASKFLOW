@@ -13,9 +13,10 @@ import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
+import 'widgets/theme_decorations.dart';
+import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
-import 'widgets/vivo_clock.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -99,6 +100,8 @@ class _HomePageState extends State<HomePage>
   Task? _pendingDelete;
   Timer? _deleteTimer;
   bool _firstLoadDone = false;
+  bool _animationsPaused = false;
+  int? _justAddedId;
 
   @override
   void initState() {
@@ -119,7 +122,16 @@ class _HomePageState extends State<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (_animationsPaused && mounted) {
+        setState(() => _animationsPaused = false);
+      }
       _onAppResumed();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (!_animationsPaused && mounted) {
+        setState(() => _animationsPaused = true);
+      }
     }
   }
 
@@ -535,6 +547,12 @@ class _HomePageState extends State<HomePage>
       builder: (_) => TaskFormDialog(task: task),
     );
     if (result != null) {
+      if (task == null && result.id != null) {
+        setState(() => _justAddedId = result.id);
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) setState(() => _justAddedId = null);
+        });
+      }
       await _loadTasks();
     }
   }
@@ -653,28 +671,50 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildBody() {
     final now = DateTime.now();
+    final theme = AppThemeScope.of(context);
+    final horizontal = theme.id == AppThemeId.grafito;
+    final slideMs = horizontal ? 250 : 450;
+    StaggeredEntrance entrance(int index, Widget child, {bool bounce = false}) {
+      return StaggeredEntrance(
+        index: index,
+        durationMs: slideMs,
+        slideHorizontal: horizontal,
+        bounce: bounce,
+        vsync: this,
+        child: child,
+      );
+    }
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_tasks.isEmpty) {
       return Column(
         children: [
-          HomeHeader(now: now, onSettings: _openSettings),
+          entrance(
+              0,
+              HomeHeader(
+                  now: now, onSettings: _openSettings, vsync: this, paused: _animationsPaused)),
           const SizedBox(height: 20),
-          WeekStripCustom(
-            now: now,
-            selected: _filterWeekday,
-            onSelect: (day) => setState(() => _filterWeekday = day),
+          entrance(
+            1,
+            WeekStripCustom(
+              now: now,
+              selected: _filterWeekday,
+              onSelect: (day) => setState(() => _filterWeekday = day),
+              vsync: this,
+              paused: _animationsPaused,
+            ),
           ),
           const SizedBox(height: 20),
-          const EmptyNextAlarmCard(),
+          entrance(2, const EmptyNextAlarmCard()),
           Expanded(
             child: Center(
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    VivoClock(vsync: this),
+                    VivoClock(vsync: this, paused: _animationsPaused),
                     const SizedBox(height: 28),
                     const ClockDigitalTime(),
                     const SizedBox(height: 6),
@@ -693,21 +733,43 @@ class _HomePageState extends State<HomePage>
     final next = findNextAlarm(_tasks, now);
     final doneCount =
         _tasks.where((t) => t.isEffectivelyCompleted(now)).length;
+    final isMidnight = theme.id == AppThemeId.medianoche;
+    final nextCard = next == null
+        ? null
+        : NextAlarmCardCustom(task: next.task, when: next.when, now: now);
+    final nextChild = nextCard == null
+        ? null
+        : (isMidnight
+            ? BorderGlow(
+                radius: theme.bigCardRadius,
+                vsync: this,
+                paused: _animationsPaused,
+                child: nextCard,
+              )
+            : nextCard);
     return Column(
       children: [
-        HomeHeader(now: now, onSettings: _openSettings),
+        entrance(
+            0,
+            HomeHeader(
+                now: now,
+                onSettings: _openSettings,
+                vsync: this,
+                paused: _animationsPaused)),
         const SizedBox(height: 20),
         WeekStripCustom(
           now: now,
           selected: _filterWeekday,
           onSelect: (day) => setState(() => _filterWeekday = day),
+          vsync: this,
+          paused: _animationsPaused,
         ),
-        if (next != null) ...[
+        if (nextChild != null) ...[
           const SizedBox(height: 20),
-          NextAlarmCardCustom(task: next.task, when: next.when, now: now),
+          entrance(2, nextChild),
         ],
         const SizedBox(height: 20),
-        _TaskCountRow(done: doneCount, total: _tasks.length),
+        entrance(3, _TaskCountRow(done: doneCount, total: _tasks.length)),
         const SizedBox(height: 12),
         Expanded(
           child: visible.isEmpty
@@ -721,25 +783,35 @@ class _HomePageState extends State<HomePage>
                   itemBuilder: (context, index) {
                     final task = visible[index];
                     final done = task.isEffectivelyCompleted(DateTime.now());
-                    final card = Dismissible(
-                      key: ValueKey('task-${task.id}'),
-                      direction: DismissDirection.endToStart,
-                      background: _DismissBackground(),
-                      onDismissed: (_) => _requestDelete(task),
-                      child: TaskCardCustom(
-                        task: task,
-                        done: done,
-                        onTap: () => _openTaskDialog(task: task),
-                        onToggle: () => _toggleTask(task),
-                      ),
+                    final fresh = task.id != null && task.id == _justAddedId;
+                    final card = TaskCardCustom(
+                      key: ValueKey('card-${task.id}'),
+                      task: task,
+                      done: done,
+                      onTap: () => _openTaskDialog(task: task),
+                      onToggle: () => _toggleTask(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      freshEntry: fresh,
                     );
+                    final swiped = SwipeDelete(
+                      key: ValueKey('task-${task.id}'),
+                      background: _DismissBackground(),
+                      onDelete: () => _requestDelete(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      child: card,
+                    );
+                    if (fresh) return swiped;
                     // Entrada limitada a 8 x 70 ms y solo en la primera
                     // carga: al desplazarse no se vuelve a animar.
-                    if (_firstLoadDone) return card;
+                    if (_firstLoadDone) return swiped;
                     return StaggeredEntrance(
-                      index: index.clamp(0, 8),
+                      index: (4 + index).clamp(0, 8),
+                      durationMs: slideMs,
+                      slideHorizontal: horizontal,
                       vsync: this,
-                      child: card,
+                      child: swiped,
                     );
                   },
                 ),
@@ -760,25 +832,49 @@ class _HomePageState extends State<HomePage>
       child: Scaffold(
         backgroundColor: theme.background,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              ..._buildPlatformNotice(),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _buildBody(),
-                ),
+              Positioned.fill(
+                child: ThemeDecorations(
+                    vsync: this, paused: _animationsPaused),
               ),
+              Column(
+                children: [
+                  ..._buildPlatformNotice(),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: _buildBody(),
+                    ),
+                  ),
               Padding(
                 padding: EdgeInsets.only(
                   left: 24,
                   right: 24,
                   bottom: 28 + MediaQuery.of(context).padding.bottom,
+                ), // Padding botón (el Stack se cierra abajo)
+
+                child: StaggeredEntrance(
+                  index: 4 + _tasks.length,
+                  bounce: true,
+                  slideHorizontal:
+                      AppThemeScope.of(context).id == AppThemeId.grafito,
+                  durationMs:
+                      AppThemeScope.of(context).id == AppThemeId.grafito
+                          ? 250
+                          : 450,
+                  vsync: this,
+                  child: NewTaskButton(
+                  onTap: () => _openTaskDialog(),
+                  vsync: this,
+                  paused: _animationsPaused,
                 ),
-                child: NewTaskButton(onTap: () => _openTaskDialog()),
+                ),
               ),
             ],
           ),
+        ],
+      ),
         ),
       ),
     );

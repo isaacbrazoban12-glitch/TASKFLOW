@@ -42,6 +42,18 @@ class FakeDatabaseHelper extends DatabaseHelper {
   Future<Database> get database => throw UnimplementedError('Fake sin BD real');
 }
 
+/// Las animaciones en bucle (p. ej. el Timer de temas) impiden pumpAndSettle:
+/// se avanza tiempo explícito en vez de esperar a que se aquiete todo.
+/// Superficie alta (800x1600): el diseño es para teléfonos (~844) y en 600 px
+/// la lista queda recortada y los taps no llegan (clipping del viewport).
+Future<void> pumpFrames(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(800, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 1500));
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -50,21 +62,29 @@ void main() {
 
   testWidgets('TaskFlowApp renders correctly', (WidgetTester tester) async {
     await tester.pumpWidget(TaskFlowApp());
-    await tester.pumpAndSettle();
+    await pumpFrames(tester);
 
-    expect(find.text('Nueva tarea'), findsOneWidget);
-    expect(find.byIcon(Icons.tune), findsOneWidget);
+    expect(find.text('Añadir tarea'), findsOneWidget);
+    expect(find.text('Sin tareas'), findsOneWidget);
+    expect(find.text('Crea tu primera tarea'), findsOneWidget);
     expect(
-      find.text('Aún no tienes tareas.\nToca + para agregar una.'),
+      find.text(
+        'Aún no tienes tareas. Toca Añadir tarea para crear tu primera alarma.',
+      ),
       findsOneWidget,
     );
   });
 
   testWidgets('Empty state shows message', (WidgetTester tester) async {
     await tester.pumpWidget(TaskFlowApp());
-    await tester.pumpAndSettle();
+    await pumpFrames(tester);
 
-    expect(find.text('Aún no tienes tareas.\nToca + para agregar una.'), findsOneWidget);
+    expect(
+      find.text(
+        'Aún no tienes tareas. Toca Añadir tarea para crear tu primera alarma.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Muestra las tareas guardadas en la BD', (WidgetTester tester) async {
@@ -73,14 +93,16 @@ void main() {
     );
 
     await tester.pumpWidget(TaskFlowApp());
-    await tester.pumpAndSettle();
+    await pumpFrames(tester);
 
     expect(find.text('Regar plantas'), findsNWidgets(2));
     expect(find.text('SIGUIENTE ALARMA'), findsOneWidget);
     expect(find.text('Tus tareas'), findsOneWidget);
     expect(find.text('Lun'), findsOneWidget);
     expect(
-      find.text('Aún no tienes tareas.\nToca + para agregar una.'),
+      find.text(
+        'Aún no tienes tareas. Toca Añadir tarea para crear tu primera alarma.',
+      ),
       findsNothing,
     );
   });
@@ -91,10 +113,11 @@ void main() {
     );
 
     await tester.pumpWidget(TaskFlowApp());
-    await tester.pumpAndSettle();
+    await pumpFrames(tester);
 
+    await tester.ensureVisible(find.byKey(const ValueKey('check-1')));
     await tester.tap(find.byKey(const ValueKey('check-1')));
-    await tester.pumpAndSettle();
+    await pumpFrames(tester);
 
     final texts = tester.widgetList<Text>(find.text('Estudiar'));
     expect(
