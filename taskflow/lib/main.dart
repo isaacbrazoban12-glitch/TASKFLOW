@@ -736,7 +736,13 @@ class _HomePageState extends State<HomePage>
     final isMidnight = theme.id == AppThemeId.medianoche;
     final nextCard = next == null
         ? null
-        : NextAlarmCardCustom(task: next.task, when: next.when, now: now);
+        : NextAlarmCardCustom(
+            task: next.task,
+            when: next.when,
+            now: now,
+            vsync: this,
+            paused: _animationsPaused,
+          );
     final nextChild = nextCard == null
         ? null
         : (isMidnight

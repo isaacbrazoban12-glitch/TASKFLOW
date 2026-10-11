@@ -2,6 +2,10 @@ package com.example.taskflow
 
 import android.app.KeyguardManager
 import android.app.NotificationManager
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
@@ -14,9 +18,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -37,6 +43,11 @@ class AlarmActivity : AppCompatActivity() {
     private var vibrator: Vibrator? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeTicker: Runnable? = null
+    private var bellAnimator: ObjectAnimator? = null
+    private var haloAnimator: AnimatorSet? = null
+    private val animHandler = Handler(Looper.getMainLooper())
+    private var bellRestart: Runnable? = null
+    private var animationsRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,6 +106,7 @@ class AlarmActivity : AppCompatActivity() {
 
         applyTheme(ThemeHelper.currentTheme(this))
         startAlarmSoundAndVibration()
+        startBellAndHalo()
     }
 
     /**
@@ -156,6 +168,96 @@ class AlarmActivity : AppCompatActivity() {
         btnSnooze.typeface = bodyFace
     }
 
+    /**
+     * Campana con balanceo de péndulo (pivote arriba al centro): gira de
+     * -14° a +14° en 0,9 s con ease-in-out, repite 3 ciclos y descansa 1,2 s,
+     * en bucle mientras la alarma suena. El halo exterior late entre escala
+     * 1.0-1.12 y opacidad 0.18-0.06 en ciclos de 1,6 s.
+     * Sin animaciones si ANIMATOR_DURATION_SCALE = 0.
+     */
+    private fun animationsDisabled(): Boolean {
+        return try {
+            Settings.Global.getFloat(
+                contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun startBellAndHalo() {
+        if (animationsDisabled()) return
+        animationsRunning = true
+        val bell = findViewById<ImageView>(R.id.alarmIcon)
+        val halo = findViewById<View>(R.id.circleOuter)
+        bell.post {
+            if (!animationsRunning) return@post
+            bell.pivotX = bell.width / 2f
+            bell.pivotY = 0f
+            runBellCycle(bell)
+        }
+        val scaleX = ObjectAnimator.ofFloat(halo, View.SCALE_X, 1f, 1.12f).apply {
+            duration = 1600
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
+        }
+        val scaleY = ObjectAnimator.ofFloat(halo, View.SCALE_Y, 1f, 1.12f).apply {
+            duration = 1600
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
+        }
+        val fade = ObjectAnimator.ofFloat(halo, View.ALPHA, 1f, 0.33f).apply {
+            duration = 1600
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = ObjectAnimator.INFINITE
+        }
+        haloAnimator = AnimatorSet().apply {
+            playTogether(scaleX, scaleY, fade)
+            start()
+        }
+    }
+
+    private fun runBellCycle(bell: ImageView) {
+        if (!animationsRunning || animationsDisabled()) return
+        bellAnimator?.cancel()
+        bellAnimator = ObjectAnimator.ofFloat(bell, View.ROTATION, -14f, 14f).apply {
+            duration = 900
+            interpolator = AccelerateDecelerateInterpolator()
+            repeatMode = ObjectAnimator.REVERSE
+            repeatCount = 5
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!animationsRunning) return
+                    bellRestart?.let { animHandler.removeCallbacks(it) }
+                    bellRestart = Runnable { runBellCycle(bell) }
+                    animHandler.postDelayed(bellRestart!!, 1200)
+                }
+            })
+            start()
+        }
+    }
+
+    private fun stopBellAndHalo() {
+        animationsRunning = false
+        bellRestart?.let { animHandler.removeCallbacks(it) }
+        bellRestart = null
+        try {
+            bellAnimator?.cancel()
+        } catch (_: Exception) {
+        }
+        bellAnimator = null
+        try {
+            haloAnimator?.cancel()
+        } catch (_: Exception) {
+        }
+        haloAnimator = null
+    }
+
     private fun startAlarmSoundAndVibration() {
         try {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -207,7 +309,13 @@ class AlarmActivity : AppCompatActivity() {
         vibrator = null
     }
 
+    override fun onStop() {
+        stopBellAndHalo()
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        stopBellAndHalo()
         timeTicker?.let { timeHandler.removeCallbacks(it) }
         timeTicker = null
         stopAlarmSoundAndVibration()
@@ -241,6 +349,7 @@ class AlarmActivity : AppCompatActivity() {
      * Dart aplica su parte después leyendo la acción pendiente guardada.
      */
     private fun finishWithAction(action: String) {
+        stopBellAndHalo()
         stopAlarmSoundAndVibration()
         if (taskId <= 0) {
             finish()
