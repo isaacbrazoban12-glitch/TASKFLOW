@@ -1,8 +1,10 @@
 package com.example.taskflow
 
 import android.app.KeyguardManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -13,12 +15,14 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.res.ResourcesCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -52,7 +56,15 @@ class AlarmActivity : AppCompatActivity() {
         val btnComplete = findViewById<Button>(R.id.btnComplete)
         val btnSnooze = findViewById<Button>(R.id.btnSnooze)
 
-        val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+        // Sin la notificación de respaldo encima si es posible: ya disparó.
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(taskId * 10 + weekday)
+            nm.cancel(taskId * 10 + weekday + 100000)
+        } catch (_: Exception) {
+        }
+
+        val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
         tvTime.text = timeFormat.format(Date())
         timeTicker = object : Runnable {
             override fun run() {
@@ -86,22 +98,62 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     /**
-     * Tiñe la pantalla con el tema vigente (ver `ThemeHelper`).
+     * Aplica el tema vigente (ver `ThemeHelper`).
      * No toca sonido, vibración, acciones ni reprogramación.
      */
     private fun applyTheme(theme: AlarmTheme) {
+        val density = resources.displayMetrics.density
+        val hourFace = ResourcesCompat.getFont(this, theme.fontHour)
+        val bodyFace = ResourcesCompat.getFont(this, theme.fontBody)
+
         findViewById<LinearLayout>(R.id.alarmRoot).setBackgroundColor(theme.background)
-        findViewById<ImageView>(R.id.alarmIcon).setColorFilter(theme.accent)
-        findViewById<TextView>(R.id.tvTime).setTextColor(theme.onBackground)
-        findViewById<TextView>(R.id.tvTaskTitle).setTextColor(theme.onBackground)
-        findViewById<TextView>(R.id.tvSnoozeCount).setTextColor(theme.onBackground)
+
+        findViewById<TextView>(R.id.tvAlarmLabel).setTextColor(theme.label)
+        val dateFormat = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es"))
+        val dateText = dateFormat.format(Date()).replaceFirstChar { it.uppercase() }
+        findViewById<TextView>(R.id.tvDate).apply {
+            text = dateText
+            setTextColor(theme.onBackground)
+            typeface = bodyFace
+        }
+
+        findViewById<View>(R.id.circleOuter).backgroundTintList =
+            ColorStateList.valueOf((theme.accent and 0x00FFFFFF) or 0x2E000000)
+        findViewById<View>(R.id.circleInner).backgroundTintList =
+            ColorStateList.valueOf(theme.accent)
+        findViewById<ImageView>(R.id.alarmIcon).setColorFilter(theme.onAccent)
+
+        findViewById<TextView>(R.id.tvTime).apply {
+            setTextColor(theme.hour)
+            typeface = hourFace
+        }
+        findViewById<TextView>(R.id.tvTaskTitle).apply {
+            setTextColor(theme.onBackground)
+            typeface = bodyFace
+        }
+        findViewById<TextView>(R.id.tvSnoozeCount).apply {
+            setTextColor(theme.onBackground)
+            typeface = bodyFace
+        }
+
+        val radius = theme.buttonRadiusDp * density
         val btnComplete = findViewById<Button>(R.id.btnComplete)
-        btnComplete.backgroundTintList = ColorStateList.valueOf(theme.accent)
+        btnComplete.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setColor(theme.accent)
+        }
         btnComplete.setTextColor(theme.onAccent)
+        btnComplete.typeface = bodyFace
         val btnSnooze = findViewById<Button>(R.id.btnSnooze)
-        btnSnooze.backgroundTintList =
-            ColorStateList.valueOf((theme.accent and 0x00FFFFFF) or 0x40000000)
+        btnSnooze.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setStroke((1.5f * density).toInt(), theme.secondaryBorder)
+            setColor(android.graphics.Color.TRANSPARENT)
+        }
         btnSnooze.setTextColor(theme.onBackground)
+        btnSnooze.typeface = bodyFace
     }
 
     private fun startAlarmSoundAndVibration() {

@@ -8,11 +8,21 @@ String _formatMinutes(int minutes) {
   return '$h:$m';
 }
 
-/// Pantalla de Ajustes: modo de tema, reglas de horario y vista previa.
+/// Pantalla de Ajustes: modo de tema, reglas de horario, vista previa y
+/// herramientas (antes en la cabecera de la portada).
 class SettingsPage extends StatelessWidget {
   final ThemeController themeController;
+  final VoidCallback? onTestNotification;
+  final VoidCallback? onOpenOverlaySettings;
+  final VoidCallback? onReschedule;
 
-  const SettingsPage({super.key, required this.themeController});
+  const SettingsPage({
+    super.key,
+    required this.themeController,
+    this.onTestNotification,
+    this.onOpenOverlaySettings,
+    this.onReschedule,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +43,32 @@ class SettingsPage extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             _PreviewSection(themeController: themeController),
+            if (onTestNotification != null ||
+                onOpenOverlaySettings != null ||
+                onReschedule != null) ...[
+              const SizedBox(height: 8),
+              Text('Herramientas',
+                  style: Theme.of(context).textTheme.titleMedium),
+              if (onTestNotification != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Probar notificación'),
+                  subtitle: const Text('Programa una alarma a 10 segundos'),
+                  onTap: onTestNotification,
+                ),
+              if (onOpenOverlaySettings != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Permiso mostrar sobre apps'),
+                  onTap: onOpenOverlaySettings,
+                ),
+              if (onReschedule != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Reprogramar alarmas'),
+                  onTap: onReschedule,
+                ),
+            ],
           ],
         ),
       ),
