@@ -86,6 +86,14 @@
   "USB debugging (Security settings)" de Xiaomi; ya activado al final.)
 - Nota: probar siempre en release antes de dar algo por terminado (debug no ejerce R8).
 
+### BUG-10 — `ThemeRule.fromMap` revienta con `start` no numérico
+- ID | Severidad | Estado: **BUG-10 | baja | arreglado**
+- Archivo y línea: `taskflow/lib/theme_controller.dart` (`fromMap`)
+- Cómo reproducirlo: `ThemeRule.fromMap({'start': 'x', 'theme': 'rosa'})` lanzaba
+  `TypeError` por el cast `as num?` (lo cazó `test/theme_test.dart` antes de commitear).
+- Esperado vs. real: esperado = null ante dato inválido; real = excepción.
+- Cómo se arregló: lectura tolerante (`is num` o `int.tryParse`).
+
 ### BUG-08 — Hora congelada en la pantalla de alarma
 - ID | Severidad | Estado: **BUG-08 | baja | arreglado**
 - Archivo y línea: `taskflow/lib/widgets/alarm_dialog.dart:89` (`_updateTime` solo en `initState`); `AlarmActivity.kt:43` (`tvTime` solo en `onCreate`)
@@ -200,6 +208,33 @@ sin paréntesis antes de commitear). Nota: el canal viejo `taskflow_alarms` reap
 en `dumpsys` por notificaciones pendientes anteriores al cambio; inofensivo (nada
 nuevo lo usa) y se limpia al disparar/cancelar.
 
+### D17. Rediseño Portada fiel al diseño (2026-10-11)
+Sin `AppBar`/`FloatingActionButton`/botones Material: cabecera propia (fecha + Hoy +
+botón redondo a Ajustes), franja de 7 chips iguales con día-número, tarjeta Siguiente
+alarma con píldora relativa, fila "X de Y listas", tarjetas con check 44 y borrado
+por deslizar con Deshacer propio (sin `SnackBar`), botón pill ancho completo con
+sombra del acento. Acciones anteriores (campana/overlay/refrescar) movidas a
+Ajustes>Herramientas. Fuentes incluidas en `assets/fonts` + `pubspec` (sin descargas).
+Supuestos anotados: check hecho Bosque = acento con icono oscuro; icono check Rosa
+oscuro `#0E1B14`; token `danger` añadido por tema. La `AppBar` de Ajustes y el
+diálogo de formulario se dejan como están (fuera de las 2 pantallas pedidas).
+El enlace de los lienzos pide login: se diseñó desde la descripción del enunciado.
+
+### D18. Pantalla de alarma nativa fiel (2026-10-10)
+Layout reescrito (3 grupos, círculos 176/120, hora 72sp, botones 64/56 con
+`textAllCaps=false`, radios por tema con `GradientDrawable`); `ThemeHelper` con
+fuentes (`ResourcesCompat`) y radios; al mostrarse cancela la notificación de
+respaldo ya disparada. Iconos de botones del sistema (~24dp vs 20/22 del diseño:
+diferencia invisible). Sin tocar sonido/vibración/acciones/reprogramación.
+Release instalado: Bosque activo en sábado por horario, cambio a Manual/Rosa desde
+Ajustes aplicado en vivo (previews y radio correctos), tarea creada que disparó a su
+hora (`Disparado` + `Reprogramada` + `Lanzando AlarmActivity` en logcat), Completar
+nativo aplicado sin abrir `MainActivity` (pendiente consumido después: tile tachado).
+El `flutter build apk --release` además compila el Kotlin (cazó un `isNotEmpty`
+sin paréntesis antes de commitear). Nota: el canal viejo `taskflow_alarms` reaparece
+en `dumpsys` por notificaciones pendientes anteriores al cambio; inofensivo (nada
+nuevo lo usa) y se limpia al disparar/cancelar.
+
 ## Cosas que no pude probar
 
 - `AlarmActivity` sobre bloqueo y píxeles exactos del tema nativo (disparó y cerró
@@ -213,6 +248,8 @@ nuevo lo usa) y se limpia al disparar/cancelar.
 - Comportamiento en iOS (sin dispositivo Apple) y resultado de la revisión de Play.
 - `AlarmDialog` a 150 % en pantalla pequeña.
 - ~~Taps de crear/editar/borrar en release~~ — hecho a mano por el usuario (ver BUG-09).
+- Rediseño (Portada + Alarma) en equipo real: el USB se cayó antes de instalar el
+  nuevo APK; pendiente instalar, crear tarea, ver la alarma con tema y completar.
 
 ## Siguiente paso recomendado
 
@@ -230,7 +267,7 @@ Analyzing taskflow...
 No issues found!
 ```
 
-`flutter test` (48/48):
+`flutter test` (48/48 + Portada re-verificada tras el rediseño):
 - `test/snooze_key_test.dart`: 5/5 (clave multiplataforma, reload, limpieza)
 - `test/snooze_test.dart`: 9/9 (ids con/sin snooze, marca ±5 min, vencida→null+limpia,
   clear, pendientes consume-una-vez/json-roto, frescura)
