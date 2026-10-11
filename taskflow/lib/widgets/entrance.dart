@@ -36,19 +36,15 @@ class _StaggeredEntranceState extends State<StaggeredEntrance> {
   late final Animation<double> _shift;
   late final Animation<double> _scale;
 
+  bool _scheduled = false;
+
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: widget.vsync,
       duration: Duration(milliseconds: widget.durationMs),
-      value: MediaQuery.of(context).disableAnimations ? 1 : 0,
     );
-    if (_controller.value < 1) {
-      Future.delayed(Duration(milliseconds: widget.index * widget.stepMs), () {
-        if (mounted) _controller.forward();
-      });
-    }
     final curved =
         CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
     _fade = curved;
@@ -56,6 +52,21 @@ class _StaggeredEntranceState extends State<StaggeredEntrance> {
     _scale = Tween<double>(begin: 0.9, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
     );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations) {
+      _controller.value = 1;
+      return;
+    }
+    if (!_scheduled) {
+      _scheduled = true;
+      Future.delayed(Duration(milliseconds: widget.index * widget.stepMs), () {
+        if (mounted) _controller.forward();
+      });
+    }
   }
 
   @override

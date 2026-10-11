@@ -86,7 +86,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
   List<Task> _tasks = [];
@@ -729,12 +729,14 @@ class _HomePageState extends State<HomePage>
                         direction: DismissDirection.endToStart,
                         background: _DismissBackground(),
                         onDismissed: (_) => _requestDelete(task),
-                        child: TaskCardCustom(
-                          task: task,
-                          done: done,
-                          onTap: () => _openTaskDialog(task: task),
-                          onToggle: () => _toggleTask(task),
-                        ),
+                      child: TaskCardCustom(
+                        task: task,
+                        done: done,
+                        onTap: () => _openTaskDialog(task: task),
+                        onToggle: () => _toggleTask(task),
+                        vsync: this,
+                        paused: _animationsPaused,
+                      ),
                       ),
                     );
                   },

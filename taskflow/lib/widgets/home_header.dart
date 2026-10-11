@@ -142,21 +142,30 @@ class _DayChipState extends State<_DayChip> {
       widget.day.month == widget.now.month &&
       widget.day.day == widget.now.day;
 
+  bool _scheduled = false;
+
   @override
   void initState() {
     super.initState();
     _pulse = AnimationController(
       vsync: widget.vsync,
       duration: const Duration(milliseconds: 400),
-      value: MediaQuery.of(context).disableAnimations ? 1 : 0,
     );
-    if (_isToday && _pulse.value < 1) {
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations || !_isToday) {
+      _pulse.value = 1;
+      return;
+    }
+    if (!_scheduled) {
+      _scheduled = true;
       // Tras su propia entrada (40 ms por chip + 450 ms de animación).
       Future.delayed(Duration(milliseconds: widget.index * 40 + 450), () {
         if (mounted) _pulse.forward();
       });
-    } else {
-      _pulse.value = 1;
     }
   }
 
@@ -330,12 +339,16 @@ class NextAlarmCardCustom extends StatelessWidget {
   }
 }
 
-/// Tarjeta de tarea (el desliz para borrar lo pone el padre con Dismissible).
-class TaskCardCustom extends StatelessWidget {
+/// Tarjeta de tarea (el desliz para borrar lo pone el padre).
+/// Al marcar: el círculo se llena (escala 0.8→1.0 en 200 ms), el check se
+/// dibuja trazo a trazo (250 ms) y el título se tacha de izquierda a derecha.
+class TaskCardCustom extends StatefulWidget {
   final Task task;
   final bool done;
   final VoidCallback onTap;
   final VoidCallback onToggle;
+  final TickerProvider vsync;
+  final bool paused;
 
   const TaskCardCustom({
     super.key,
@@ -343,22 +356,86 @@ class TaskCardCustom extends StatelessWidget {
     required this.done,
     required this.onTap,
     required this.onToggle,
+    required this.vsync,
+    this.paused = false,
   });
+
+  @override
+  State<TaskCardCustom> createState() => _TaskCardCustomState();
+}
+
+class _TaskCardCustomState extends State<TaskCardCustom> {
+  late final AnimationController _controller;
+  late bool _shownDone;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownDone = widget.done;
+    _controller = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 250),
+      value: _shownDone ? 1 : 0,
+    );
+    _controller.addStatusListener((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations) {
+      _controller.value = _shownDone ? 1 : 0;
+    }
+  }
+
+  @override
+  void didUpdateWidget(TaskCardCustom oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.done != _shownDone) {
+      _shownDone = widget.done;
+      _applyTarget();
+    } else if (oldWidget.paused != widget.paused) {
+      _applyTarget();
+    }
+  }
+
+  void _applyTarget() {
+    if (MediaQuery.of(context).disableAnimations) {
+      _controller.value = _shownDone ? 1 : 0;
+      return;
+    }
+    if (widget.paused) {
+      _controller.stop();
+      return;
+    }
+    if (_shownDone) {
+      _controller.forward();
+    } else {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
     final time =
-        TimeOfDay(hour: task.hour, minute: task.minute).format(context);
-    final titleStyle = TextStyle(
-      fontFamily: theme.fontDisplay,
-      fontSize: 16,
-      fontWeight: FontWeight.w800,
-      color: done ? theme.muted : theme.text,
-      decoration: done ? TextDecoration.lineThrough : null,
-    );
+        TimeOfDay(hour: widget.task.hour, minute: widget.task.minute)
+            .format(context);
+    final baseColor = _shownDone ? theme.muted : theme.text;
+    // Tachado real solo al final (el barrido lo dibuja el painter).
+    final doneDecoration = (_shownDone && _controller.isCompleted)
+        ? TextDecoration.lineThrough
+        : null;
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
@@ -369,24 +446,45 @@ class TaskCardCustom extends StatelessWidget {
         child: Row(
           children: [
             GestureDetector(
-              key: ValueKey('check-${task.id}'),
-              onTap: onToggle,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: theme.checkRadius == null ? BoxShape.circle : BoxShape.rectangle,
-                  borderRadius: theme.checkRadius == null
-                      ? null
-                      : BorderRadius.circular(theme.checkRadius!),
-                  color: done ? theme.checkDone : Colors.transparent,
-                  border: done
-                      ? null
-                      : Border.all(color: theme.checkEmpty, width: 2),
+              key: ValueKey('check-${widget.task.id}'),
+              onTap: widget.onToggle,
+              child: RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    final t = _controller.value;
+                    final fillT =
+                        Curves.easeOut.transform((t / 0.8).clamp(0.0, 1.0));
+                    return Transform.scale(
+                      scale: 0.8 + 0.2 * fillT,
+                        child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          shape: theme.checkRadius == null
+                              ? BoxShape.circle
+                              : BoxShape.rectangle,
+                          borderRadius: theme.checkRadius == null
+                              ? null
+                              : BorderRadius.circular(theme.checkRadius!),
+                          color: t > 0
+                              ? theme.checkDone.withValues(alpha: t)
+                              : Colors.transparent,
+                          border: t > 0
+                              ? null
+                              : Border.all(color: theme.checkEmpty, width: 2),
+                        ),
+                        child: t > 0
+                            ? CustomPaint(
+                                painter: _CheckPainter(
+                                    progress: t, color: theme.checkIcon),
+                                size: const Size(24, 24),
+                              )
+                            : null,
+                      ),
+                    );
+                  },
                 ),
-                child: done
-                    ? Icon(Icons.check, size: 24, color: theme.checkIcon)
-                    : null,
               ),
             ),
             const SizedBox(width: 14),
@@ -394,9 +492,31 @@ class TaskCardCustom extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(task.title, style: titleStyle),
+                  Stack(
+                    children: [
                   Text(
-                    _formatDays(task.weekdays),
+                    widget.task.title,
+                    style: TextStyle(
+                      fontFamily: theme.fontDisplay,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: baseColor,
+                      decoration: doneDecoration,
+                    ),
+                  ),
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _StrikePainter(
+                            progress: _controller.value,
+                            color: baseColor,
+                            repaint: _controller,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    _formatDays(widget.task.weekdays),
                     style: TextStyle(
                       fontFamily: theme.fontBody,
                       fontSize: 13,
@@ -406,15 +526,28 @@ class TaskCardCustom extends StatelessWidget {
                 ],
               ),
             ),
-            Text(
-              time,
-              style: TextStyle(
-                fontFamily: theme.fontMono ?? theme.fontDisplay,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: done ? theme.muted : theme.text,
-                decoration: done ? TextDecoration.lineThrough : null,
-              ),
+              Stack(
+              children: [
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontFamily: theme.fontMono ?? theme.fontDisplay,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: baseColor,
+                    decoration: doneDecoration,
+                  ),
+                ),
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _StrikePainter(
+                      progress: _controller.value,
+                      color: baseColor,
+                      repaint: _controller,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -426,6 +559,66 @@ class TaskCardCustom extends StatelessWidget {
     if (weekdays.isEmpty) return 'Sin días';
     return weekdays.map((d) => kDayNames[d - 1]).join(', ');
   }
+}
+
+/// Check dibujado trazo a trazo según [progress] (0 a 1).
+class _CheckPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _CheckPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    final path = Path()
+      ..moveTo(size.width * 0.25, size.height * 0.52)
+      ..lineTo(size.width * 0.45, size.height * 0.70)
+      ..lineTo(size.width * 0.75, size.height * 0.32);
+    final metrics = path.computeMetrics().first;
+    final drawn =
+        metrics.extractPath(0, metrics.length * progress.clamp(0.0, 1.0));
+    canvas.drawPath(
+      drawn,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CheckPainter old) =>
+      old.progress != progress || old.color != color;
+}
+
+/// Línea de tachado que avanza de izquierda a derecha.
+class _StrikePainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _StrikePainter(
+      {required this.progress, required this.color, required Listenable repaint})
+      : super(repaint: repaint);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width * progress.clamp(0.0, 1.0), size.height / 2),
+      Paint()
+        ..color = color
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_StrikePainter old) =>
+      old.progress != progress || old.color != color;
 }
 
 /// Botón "Nueva tarea" de ancho completo.
