@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_themes.dart';
 import 'database/database_helper.dart';
@@ -12,7 +14,6 @@ import 'widgets/alarm_dialog.dart';
 import 'widgets/home_header.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
-import 'widgets/task_tile.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -64,7 +65,10 @@ class _TaskFlowAppState extends State<TaskFlowApp> {
           debugShowCheckedModeBanner: false,
           title: 'TaskFlow',
           theme: appThemeOf(widget.themeController.current).data,
-          home: HomePage(themeController: widget.themeController),
+          home: AppThemeScope(
+            theme: appThemeOf(widget.themeController.current),
+            child: HomePage(themeController: widget.themeController),
+          ),
         );
       },
     );
@@ -89,6 +93,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _overlayDialogOpen = false;
   bool _overlayGranted = true;
   int? _filterWeekday;
+  Task? _pendingDelete;
+  Timer? _deleteTimer;
 
   @override
   void initState() {
@@ -102,6 +108,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _deleteTimer?.cancel();
     super.dispose();
   }
 
@@ -535,41 +542,62 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _deleteTask(Task task) async {
-    if (task.id == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Eliminar tarea'),
-        content: Text('¿Quieres eliminar "${task.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+  /// Borra al deslizar con opción a Deshacer durante 4 segundos.
+  void _requestDelete(Task task) {
+    _deleteTimer?.cancel();
+    if (_pendingDelete != null) {
+      final previous = _pendingDelete!;
+      _pendingDelete = null;
+      _commitDelete(previous);
+    }
+    setState(() {
+      _tasks = _tasks.where((t) => t.id != task.id).toList();
+      _pendingDelete = task;
+    });
+    _deleteTimer = Timer(const Duration(seconds: 4), () {
+      final gone = _pendingDelete;
+      _pendingDelete = null;
+      if (gone != null) _commitDelete(gone);
+      if (mounted) setState(() {});
+    });
+  }
 
+  Future<void> _commitDelete(Task task) async {
+    if (task.id == null) return;
     try {
       await _db.deleteTask(task.id!);
       await NotificationService.instance.cancelTask(task.id!);
-      await _loadTasks();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tarea eliminada')),
-      );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al eliminar tarea: $e')),
-      );
+      debugPrint('[HomePage] Error al eliminar tarea: $e');
     }
+    await _loadTasks();
+  }
+
+  void _undoDelete() {
+    _deleteTimer?.cancel();
+    _deleteTimer = null;
+    _pendingDelete = null;
+    _loadTasks();
+  }
+
+  void _openSettings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          themeController: widget.themeController,
+          onTestNotification: _testNotification,
+          onOpenOverlaySettings: _openOverlaySettings,
+          onReschedule: _rescheduleAllTasks,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openOverlaySettings() async {
+    final can = await NotificationService.instance.canDrawOverlays();
+    debugPrint('[HomePage] Permiso overlay al tocar botón: $can');
+    await NotificationService.instance.openOverlaySettings();
   }
 
   Future<void> _testNotification() async {
@@ -614,108 +642,163 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
+    final now = DateTime.now();
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_tasks.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Aún no tienes tareas.\nToca + para agregar una.',
-            textAlign: TextAlign.center,
+      return Column(
+        children: [
+          HomeHeader(now: now, onSettings: _openSettings),
+          const SizedBox(height: 20),
+          const Expanded(
+            child: Center(
+              child: Text('Aún no tienes tareas.\nToca + para agregar una.'),
+            ),
           ),
-        ),
+        ],
       );
     }
-    final daysWithTasks = <int>{
-      for (final task in _tasks) ...task.weekdays,
-    };
     final visible = _filterWeekday == null
         ? _tasks
         : _tasks.where((t) => t.weekdays.contains(_filterWeekday)).toList();
-    final next = findNextAlarm(_tasks, DateTime.now());
+    final next = findNextAlarm(_tasks, now);
+    final doneCount =
+        _tasks.where((t) => t.isEffectivelyCompleted(now)).length;
     return Column(
       children: [
-        WeekStrip(
+        HomeHeader(now: now, onSettings: _openSettings),
+        const SizedBox(height: 20),
+        WeekStripCustom(
+          now: now,
           selected: _filterWeekday,
-          daysWithTasks: daysWithTasks,
           onSelect: (day) => setState(() => _filterWeekday = day),
         ),
-        if (next != null) NextAlarmCard(task: next.task, when: next.when),
+        if (next != null) ...[
+          const SizedBox(height: 20),
+          NextAlarmCardCustom(task: next.task, when: next.when, now: now),
+        ],
+        const SizedBox(height: 20),
+        _TaskCountRow(done: doneCount, total: _tasks.length),
+        const SizedBox(height: 12),
         Expanded(
           child: visible.isEmpty
               ? const Center(
                   child: Text('Sin tareas este día.'),
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.all(12),
+                  padding: EdgeInsets.zero,
                   itemCount: visible.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final task = visible[index];
-                    return TaskTile(
-                      task: task,
-                      onTap: () => _openTaskDialog(task: task),
-                      onCheckboxChanged: (_) => _toggleTask(task),
-                      onDelete: () => _deleteTask(task),
+                    final done = task.isEffectivelyCompleted(DateTime.now());
+                    return Dismissible(
+                      key: ValueKey('task-${task.id}'),
+                      direction: DismissDirection.endToStart,
+                      background: _DismissBackground(),
+                      onDismissed: (_) => _requestDelete(task),
+                      child: TaskCardCustom(
+                        task: task,
+                        done: done,
+                        onTap: () => _openTaskDialog(task: task),
+                        onToggle: () => _toggleTask(task),
+                      ),
                     );
                   },
                 ),
         ),
+        if (_pendingDelete != null) ...[
+          const SizedBox(height: 12),
+          UndoBar(onUndo: _undoDelete),
+        ],
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mis Tareas'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_active),
-            tooltip: 'Probar notificación',
-            onPressed: _testNotification,
-          ),
-          IconButton(
-            icon: const Icon(Icons.open_in_full),
-            tooltip: 'Permiso mostrar sobre apps',
-            onPressed: () async {
-              final can = await NotificationService.instance.canDrawOverlays();
-              debugPrint('[HomePage] Permiso overlay al tocar botón: $can');
-              await NotificationService.instance.openOverlaySettings();
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadTasks,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Ajustes de tema',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SettingsPage(themeController: widget.themeController),
+    final theme = AppThemeScope.of(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: theme.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        backgroundColor: theme.background,
+        body: SafeArea(
+          child: Column(
+            children: [
+              ..._buildPlatformNotice(),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: _buildBody(),
                 ),
-              );
-            },
+              ),
+              Padding(
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  bottom: 28 + MediaQuery.of(context).padding.bottom,
+                ),
+                child: NewTaskButton(onTap: () => _openTaskDialog()),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-      body: Column(
-        children: [
-          ..._buildPlatformNotice(),
-          Expanded(child: _buildBody()),
-        ],
+    );
+  }
+}
+
+/// Fila "Tus tareas" + "X de Y listas".
+class _TaskCountRow extends StatelessWidget {
+  final int done;
+  final int total;
+
+  const _TaskCountRow({required this.done, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Tus tareas',
+            style: TextStyle(
+              fontFamily: theme.fontDisplay,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: theme.text,
+            ),
+          ),
+        ),
+        Text(
+          '$done de $total listas',
+          style: TextStyle(
+            fontFamily: theme.fontBody,
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: theme.accent,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Fondo del desliz para borrar.
+class _DismissBackground extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: theme.danger,
+        borderRadius: BorderRadius.circular(theme.cardRadius),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openTaskDialog(),
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva tarea'),
-      ),
+      alignment: Alignment.centerRight,
+      child: Icon(Icons.delete_outline, color: theme.onAccent),
     );
   }
 }
