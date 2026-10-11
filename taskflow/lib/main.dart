@@ -13,6 +13,7 @@ import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
+import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
 
@@ -684,9 +685,19 @@ class _HomePageState extends State<HomePage>
         children: [
           entrance(0, HomeHeader(now: now, onSettings: _openSettings)),
           const SizedBox(height: 20),
-          const Expanded(
+          Expanded(
             child: Center(
-              child: Text('Aún no tienes tareas.\nToca + para agregar una.'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  VivoClock(vsync: this, paused: _animationsPaused),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Aún no tienes tareas.\nToca + para agregar una.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
