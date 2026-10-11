@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../app_themes.dart';
 import '../constants.dart';
 import '../models/task.dart';
+import 'entrance.dart';
 
 /// Cabecera sin AppBar: fecha + título a la izquierda, botón de ajustes redondo.
 class HomeHeader extends StatelessWidget {
@@ -59,16 +60,21 @@ class HomeHeader extends StatelessWidget {
 }
 
 /// Franja de 7 chips iguales siempre visibles; filtra por día.
+/// Los chips entran de izquierda a derecha con 40 ms de diferencia.
 class WeekStripCustom extends StatelessWidget {
   final DateTime now;
   final int? selected;
   final ValueChanged<int?> onSelect;
+  final TickerProvider vsync;
+  final bool paused;
 
   const WeekStripCustom({
     super.key,
     required this.now,
     required this.selected,
     required this.onSelect,
+    required this.vsync,
+    this.paused = false,
   });
 
   @override
@@ -79,53 +85,144 @@ class WeekStripCustom extends StatelessWidget {
       children: [
         for (int i = 0; i < 7; i++) ...[
           if (i > 0) const SizedBox(width: 6),
-          Expanded(child: _dayChip(context, theme, monday.add(Duration(days: i)))),
+          Expanded(
+            child: StaggeredEntrance(
+              index: i,
+              stepMs: 40,
+              slideHorizontal: theme.id == AppThemeId.grafito,
+              durationMs: theme.id == AppThemeId.grafito ? 250 : 450,
+              vsync: vsync,
+              child: _DayChip(
+                now: now,
+                day: monday.add(Duration(days: i)),
+                selected: selected,
+                onSelect: onSelect,
+                vsync: vsync,
+                paused: paused,
+              ),
+            ),
+          ),
         ],
       ],
     );
   }
 
-  Widget _dayChip(BuildContext context, AppTheme theme, DateTime day) {
-    final isToday = day.year == now.year && day.month == now.month && day.day == now.day;
-    final isSelected = selected == day.weekday;
-    final filled = isToday;
+}
+
+/// Chip de día con pulso de entrada si es hoy (punto 2).
+class _DayChip extends StatefulWidget {
+  final DateTime now;
+  final DateTime day;
+  final int? selected;
+  final ValueChanged<int?> onSelect;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const _DayChip({
+    required this.now,
+    required this.day,
+    required this.selected,
+    required this.onSelect,
+    required this.vsync,
+    required this.paused,
+  });
+
+  @override
+  State<_DayChip> createState() => _DayChipState();
+}
+
+class _DayChipState extends State<_DayChip> {
+  late final AnimationController _pulse;
+
+  bool get _isToday =>
+      widget.day.year == widget.now.year &&
+      widget.day.month == widget.now.month &&
+      widget.day.day == widget.now.day;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 400),
+      value: MediaQuery.of(context).disableAnimations ? 1 : 0,
+    );
+    if (_isToday && _pulse.value < 1) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _pulse.forward();
+      });
+    } else {
+      _pulse.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppThemeScope.of(context);
+    final isSelected = widget.selected == widget.day.weekday;
+    final filled = _isToday;
     final textColor = filled ? theme.onAccent : theme.text;
+    final pulse = _isToday
+        ? TweenSequence<double>([
+            TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.12), weight: 50),
+            TweenSequenceItem(tween: Tween(begin: 1.12, end: 1.0), weight: 50),
+          ]).animate(
+            CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+          )
+        : const AlwaysStoppedAnimation(1.0);
     return GestureDetector(
-      onTap: () => onSelect(isSelected ? null : day.weekday),
-      child: Container(
-        height: 64,
-        decoration: BoxDecoration(
-          color: filled ? theme.accent : theme.chipBg,
-          borderRadius: BorderRadius.circular(theme.chipRadius),
-          border: Border.all(
-            color: filled
-                ? theme.accent
-                : (isSelected ? theme.accent : (theme.chipBorder ?? Colors.transparent)),
-            width: isSelected && !filled ? 2 : 1,
+      onTap: () => widget.onSelect(isSelected ? null : widget.day.weekday),
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: pulse,
+          builder: (context, child) => Transform.scale(
+            scale: pulse.value,
+            child: child,
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              kDayNames[day.weekday - 1][0],
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: filled ? theme.onAccent : theme.chipLetter,
+          child: Container(
+            height: 64,
+            decoration: BoxDecoration(
+              color: filled ? theme.accent : theme.chipBg,
+              borderRadius: BorderRadius.circular(theme.chipRadius),
+              border: Border.all(
+                color: filled
+                    ? theme.accent
+                    : (isSelected
+                        ? theme.accent
+                        : (theme.chipBorder ?? Colors.transparent)),
+                width: isSelected && !filled ? 2 : 1,
               ),
             ),
-            Text(
-              '${day.day}',
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-              ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  kDayNames[widget.day.weekday - 1][0],
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: filled ? theme.onAccent : theme.chipLetter,
+                  ),
+                ),
+                Text(
+                  '${widget.day.day}',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

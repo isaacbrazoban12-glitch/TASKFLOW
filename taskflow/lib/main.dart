@@ -11,6 +11,7 @@ import 'models/task.dart';
 import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
+import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
@@ -84,7 +85,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
   List<Task> _tasks = [];
@@ -95,6 +97,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int? _filterWeekday;
   Task? _pendingDelete;
   Timer? _deleteTimer;
+  bool _animationsPaused = false;
 
   @override
   void initState() {
@@ -115,7 +118,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (_animationsPaused && mounted) {
+        setState(() => _animationsPaused = false);
+      }
       _onAppResumed();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (!_animationsPaused && mounted) {
+        setState(() => _animationsPaused = true);
+      }
     }
   }
 
@@ -643,13 +655,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildBody() {
     final now = DateTime.now();
+    final theme = AppThemeScope.of(context);
+    final horizontal = theme.id == AppThemeId.grafito;
+    final slideMs = horizontal ? 250 : 450;
+    StaggeredEntrance entrance(int index, Widget child, {bool bounce = false}) {
+      return StaggeredEntrance(
+        index: index,
+        durationMs: slideMs,
+        slideHorizontal: horizontal,
+        bounce: bounce,
+        vsync: this,
+        child: child,
+      );
+    }
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_tasks.isEmpty) {
       return Column(
         children: [
-          HomeHeader(now: now, onSettings: _openSettings),
+          entrance(0, HomeHeader(now: now, onSettings: _openSettings)),
           const SizedBox(height: 20),
           const Expanded(
             child: Center(
@@ -667,19 +693,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _tasks.where((t) => t.isEffectivelyCompleted(now)).length;
     return Column(
       children: [
-        HomeHeader(now: now, onSettings: _openSettings),
+        entrance(0, HomeHeader(now: now, onSettings: _openSettings)),
         const SizedBox(height: 20),
         WeekStripCustom(
           now: now,
           selected: _filterWeekday,
           onSelect: (day) => setState(() => _filterWeekday = day),
+          vsync: this,
+          paused: _animationsPaused,
         ),
         if (next != null) ...[
           const SizedBox(height: 20),
-          NextAlarmCardCustom(task: next.task, when: next.when, now: now),
+          entrance(
+              2, NextAlarmCardCustom(task: next.task, when: next.when, now: now)),
         ],
         const SizedBox(height: 20),
-        _TaskCountRow(done: doneCount, total: _tasks.length),
+        entrance(3, _TaskCountRow(done: doneCount, total: _tasks.length)),
         const SizedBox(height: 12),
         Expanded(
           child: visible.isEmpty
@@ -693,16 +722,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   itemBuilder: (context, index) {
                     final task = visible[index];
                     final done = task.isEffectivelyCompleted(DateTime.now());
-                    return Dismissible(
-                      key: ValueKey('task-${task.id}'),
-                      direction: DismissDirection.endToStart,
-                      background: _DismissBackground(),
-                      onDismissed: (_) => _requestDelete(task),
-                      child: TaskCardCustom(
-                        task: task,
-                        done: done,
-                        onTap: () => _openTaskDialog(task: task),
-                        onToggle: () => _toggleTask(task),
+                    return entrance(
+                      4 + index,
+                      Dismissible(
+                        key: ValueKey('task-${task.id}'),
+                        direction: DismissDirection.endToStart,
+                        background: _DismissBackground(),
+                        onDismissed: (_) => _requestDelete(task),
+                        child: TaskCardCustom(
+                          task: task,
+                          done: done,
+                          onTap: () => _openTaskDialog(task: task),
+                          onToggle: () => _toggleTask(task),
+                        ),
                       ),
                     );
                   },
@@ -739,7 +771,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   right: 24,
                   bottom: 28 + MediaQuery.of(context).padding.bottom,
                 ),
-                child: NewTaskButton(onTap: () => _openTaskDialog()),
+                child: StaggeredEntrance(
+                  index: 4 + _tasks.length,
+                  bounce: true,
+                  slideHorizontal:
+                      AppThemeScope.of(context).id == AppThemeId.grafito,
+                  durationMs:
+                      AppThemeScope.of(context).id == AppThemeId.grafito
+                          ? 250
+                          : 450,
+                  vsync: this,
+                  child: NewTaskButton(onTap: () => _openTaskDialog()),
+                ),
               ),
             ],
           ),
