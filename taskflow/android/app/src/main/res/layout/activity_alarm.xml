@@ -71,7 +71,7 @@
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:layout_gravity="center"
-                android:src="@android:drawable/ic_lock_idle_alarm"
+                android:src="@drawable/ic_bell"
                 android:contentDescription="Alarma" />
         </FrameLayout>
 
@@ -122,7 +122,7 @@
             android:textSize="18sp"
             android:textStyle="bold"
             android:textColor="#FFFFFF"
-            android:drawableStart="@android:drawable/ic_menu_send"
+            android:drawableStart="@drawable/ic_check"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
             android:backgroundTint="#2E7D32"
@@ -137,7 +137,7 @@
             android:textAllCaps="false"
             android:textSize="16sp"
             android:textColor="#FFFFFF"
-            android:drawableStart="@android:drawable/ic_lock_idle_alarm"
+            android:drawableStart="@drawable/ic_snooze"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
             android:backgroundTint="#80FFFFFF"
