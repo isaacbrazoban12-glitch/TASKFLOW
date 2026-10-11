@@ -13,6 +13,7 @@ import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/entrance.dart';
 import 'widgets/home_header.dart';
+import 'widgets/theme_decorations.dart';
 import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/task_form_dialog.dart';
@@ -683,7 +684,10 @@ class _HomePageState extends State<HomePage>
     if (_tasks.isEmpty) {
       return Column(
         children: [
-          entrance(0, HomeHeader(now: now, onSettings: _openSettings)),
+          entrance(
+              0,
+              HomeHeader(
+                  now: now, onSettings: _openSettings, vsync: this, paused: _animationsPaused)),
           const SizedBox(height: 20),
           Expanded(
             child: Center(
@@ -709,9 +713,29 @@ class _HomePageState extends State<HomePage>
     final next = findNextAlarm(_tasks, now);
     final doneCount =
         _tasks.where((t) => t.isEffectivelyCompleted(now)).length;
+    final isMidnight = theme.id == AppThemeId.medianoche;
+    final nextCard = next == null
+        ? null
+        : NextAlarmCardCustom(task: next.task, when: next.when, now: now);
+    final nextChild = nextCard == null
+        ? null
+        : (isMidnight
+            ? BorderGlow(
+                radius: theme.bigCardRadius,
+                vsync: this,
+                paused: _animationsPaused,
+                child: nextCard,
+              )
+            : nextCard);
     return Column(
       children: [
-        entrance(0, HomeHeader(now: now, onSettings: _openSettings)),
+        entrance(
+            0,
+            HomeHeader(
+                now: now,
+                onSettings: _openSettings,
+                vsync: this,
+                paused: _animationsPaused)),
         const SizedBox(height: 20),
         WeekStripCustom(
           now: now,
@@ -720,10 +744,9 @@ class _HomePageState extends State<HomePage>
           vsync: this,
           paused: _animationsPaused,
         ),
-        if (next != null) ...[
+        if (nextChild != null) ...[
           const SizedBox(height: 20),
-          entrance(
-              2, NextAlarmCardCustom(task: next.task, when: next.when, now: now)),
+          entrance(2, nextChild),
         ],
         const SizedBox(height: 20),
         entrance(3, _TaskCountRow(done: doneCount, total: _tasks.length)),
@@ -780,21 +803,28 @@ class _HomePageState extends State<HomePage>
       child: Scaffold(
         backgroundColor: theme.background,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              ..._buildPlatformNotice(),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _buildBody(),
-                ),
+              Positioned.fill(
+                child: ThemeDecorations(
+                    vsync: this, paused: _animationsPaused),
               ),
+              Column(
+                children: [
+                  ..._buildPlatformNotice(),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: _buildBody(),
+                    ),
+                  ),
               Padding(
                 padding: EdgeInsets.only(
                   left: 24,
                   right: 24,
                   bottom: 28 + MediaQuery.of(context).padding.bottom,
-                ),
+                ), // Padding botón (el Stack se cierra abajo)
+
                 child: StaggeredEntrance(
                   index: 4 + _tasks.length,
                   bounce: true,
@@ -814,6 +844,8 @@ class _HomePageState extends State<HomePage>
               ),
             ],
           ),
+        ],
+      ),
         ),
       ),
     );

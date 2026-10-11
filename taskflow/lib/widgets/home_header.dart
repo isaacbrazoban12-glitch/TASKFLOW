@@ -5,11 +5,20 @@ import '../models/task.dart';
 import 'entrance.dart';
 
 /// Cabecera sin AppBar: fecha + título a la izquierda, botón de ajustes redondo.
+/// En Grafito, una línea de acento se dibuja bajo el título al entrar.
 class HomeHeader extends StatelessWidget {
   final DateTime now;
   final VoidCallback onSettings;
+  final TickerProvider vsync;
+  final bool paused;
 
-  const HomeHeader({super.key, required this.now, required this.onSettings});
+  const HomeHeader({
+    super.key,
+    required this.now,
+    required this.onSettings,
+    required this.vsync,
+    this.paused = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +30,13 @@ class HomeHeader extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: theme.muted,
     );
+    final titleStyle = TextStyle(
+      fontFamily: theme.fontDisplay,
+      fontSize: theme.titleSize,
+      fontWeight: FontWeight.w800,
+      height: 1.05,
+      color: theme.text,
+    );
     return Row(
       children: [
         Expanded(
@@ -28,16 +44,15 @@ class HomeHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(headerDateString(now, theme), style: dateStyle),
-              Text(
-                title,
-                style: TextStyle(
-                  fontFamily: theme.fontDisplay,
-                  fontSize: theme.titleSize,
-                  fontWeight: FontWeight.w800,
-                  height: 1.05,
-                  color: theme.text,
+              Text(title, style: titleStyle),
+              if (theme.id == AppThemeId.grafito)
+                _HoyUnderline(
+                  title: title,
+                  style: titleStyle,
+                  color: theme.accent,
+                  vsync: vsync,
+                  paused: paused,
                 ),
-              ),
             ],
           ),
         ),
@@ -55,6 +70,94 @@ class HomeHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Línea de acento bajo el título (Grafito): se dibuja al entrar.
+class _HoyUnderline extends StatefulWidget {
+  final String title;
+  final TextStyle style;
+  final Color color;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const _HoyUnderline({
+    required this.title,
+    required this.style,
+    required this.color,
+    required this.vsync,
+    required this.paused,
+  });
+
+  @override
+  State<_HoyUnderline> createState() => _HoyUnderlineState();
+}
+
+class _HoyUnderlineState extends State<_HoyUnderline> {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 450),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _controller.value = 1;
+    } else {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted) _controller.forward();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(_HoyUnderline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused) {
+      if (widget.paused) {
+        _controller.stop();
+      } else if (!MediaQuery.of(context).disableAnimations) {
+        _controller.forward();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final painter = TextPainter(
+      text: TextSpan(text: widget.title, style: widget.style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final t = Curves.easeOutCubic.transform(_controller.value);
+          return Container(
+            margin: const EdgeInsets.only(top: 4),
+            height: 3,
+            width: painter.width * t,
+            decoration: BoxDecoration(
+              color: widget.color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          );
+        },
+      ),
     );
   }
 }
