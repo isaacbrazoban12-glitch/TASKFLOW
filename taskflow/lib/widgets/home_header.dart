@@ -93,6 +93,7 @@ class WeekStripCustom extends StatelessWidget {
               durationMs: theme.id == AppThemeId.grafito ? 250 : 450,
               vsync: vsync,
               child: _DayChip(
+                index: i,
                 now: now,
                 day: monday.add(Duration(days: i)),
                 selected: selected,
@@ -111,6 +112,7 @@ class WeekStripCustom extends StatelessWidget {
 
 /// Chip de día con pulso de entrada si es hoy (punto 2).
 class _DayChip extends StatefulWidget {
+  final int index;
   final DateTime now;
   final DateTime day;
   final int? selected;
@@ -119,6 +121,7 @@ class _DayChip extends StatefulWidget {
   final bool paused;
 
   const _DayChip({
+    required this.index,
     required this.now,
     required this.day,
     required this.selected,
@@ -148,7 +151,8 @@ class _DayChipState extends State<_DayChip> {
       value: MediaQuery.of(context).disableAnimations ? 1 : 0,
     );
     if (_isToday && _pulse.value < 1) {
-      Future.delayed(const Duration(milliseconds: 500), () {
+      // Tras su propia entrada (40 ms por chip + 450 ms de animación).
+      Future.delayed(Duration(milliseconds: widget.index * 40 + 450), () {
         if (mounted) _pulse.forward();
       });
     } else {
