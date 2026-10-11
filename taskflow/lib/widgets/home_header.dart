@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../app_themes.dart';
 import '../constants.dart';
@@ -384,24 +387,139 @@ class _DayChipState extends State<_DayChip> {
 }
 
 /// Tarjeta "Siguiente alarma".
-class NextAlarmCardCustom extends StatelessWidget {
+class NextAlarmCardCustom extends StatefulWidget {
   final Task task;
   final DateTime when;
   final DateTime now;
+  final TickerProvider vsync;
+  final bool paused;
 
   const NextAlarmCardCustom({
     super.key,
     required this.task,
     required this.when,
     required this.now,
+    required this.vsync,
+    this.paused = false,
   });
+
+  @override
+  State<NextAlarmCardCustom> createState() => _NextAlarmCardCustomState();
+}
+
+/// Campana con balanceo suave de péndulo (pivote arriba al centro): de -10°
+/// a +10° con ease-in-out, 2 balanceos cada 5 s (cada 2 s si faltan menos de
+/// 10 min). Usa el TickerProvider de la pantalla; se pausa en segundo plano
+/// y no anima nada con las animaciones desactivadas.
+class _NextAlarmCardCustomState extends State<NextAlarmCardCustom> {
+  late final AnimationController _swing;
+  Timer? _timer;
+  Duration _period = const Duration(seconds: 5);
+  bool _swinging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _swing = AnimationController(
+      vsync: widget.vsync,
+      lowerBound: -10,
+      upperBound: 10,
+      value: 0,
+      duration: const Duration(milliseconds: 900),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _applySchedule();
+  }
+
+  @override
+  void didUpdateWidget(NextAlarmCardCustom oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused ||
+        oldWidget.when != widget.when ||
+        oldWidget.vsync != widget.vsync) {
+      _applySchedule();
+    }
+  }
+
+  Duration _desiredPeriod() {
+    final remaining = widget.when.difference(DateTime.now());
+    if (!remaining.isNegative && remaining.inMinutes < 10) {
+      return const Duration(seconds: 2);
+    }
+    return const Duration(seconds: 5);
+  }
+
+  void _applySchedule() {
+    _timer?.cancel();
+    _timer = null;
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _swing.stop();
+      if (_swing.value != 0) _swing.value = 0;
+      _swinging = false;
+      return;
+    }
+    _period = _desiredPeriod();
+    _timer = Timer.periodic(_period, (_) => _maybeSwing());
+  }
+
+  void _maybeSwing() {
+    if (!mounted) return;
+    if (MediaQuery.of(context).disableAnimations || widget.paused) return;
+    final wanted = _desiredPeriod();
+    if (wanted != _period) {
+      _applySchedule();
+      return;
+    }
+    if (_swinging) return;
+    _swinging = true;
+    _doSwing();
+  }
+
+  Future<void> _doSwing() async {
+    try {
+      await _swing.animateTo(
+        10,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+      if (!mounted) return;
+      await _swing.animateTo(
+        -10,
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeInOut,
+      );
+      if (!mounted) return;
+      await _swing.animateTo(
+        0,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    } catch (_) {
+      // Controlador liberado en mitad del balanceo.
+    } finally {
+      if (mounted) _swinging = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _swing.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
     final mono = theme.fontMono;
-    final dayName = kDayNames[when.weekday - 1];
-    final time = TimeOfDay(hour: when.hour, minute: when.minute).format(context);
+    final dayName = kDayNames[widget.when.weekday - 1];
+    final time =
+        TimeOfDay(hour: widget.when.hour, minute: widget.when.minute)
+            .format(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -437,7 +555,7 @@ class NextAlarmCardCustom extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  task.title,
+                  widget.task.title,
                   style: TextStyle(
                     fontFamily: theme.fontBody,
                     fontSize: 16,
@@ -453,7 +571,7 @@ class NextAlarmCardCustom extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    relativeAlarmString(when, now),
+                    relativeAlarmString(widget.when, widget.now),
                     style: TextStyle(
                       fontFamily: mono ?? theme.fontBody,
                       fontSize: 13,
@@ -472,7 +590,18 @@ class NextAlarmCardCustom extends StatelessWidget {
               shape: BoxShape.circle,
               color: theme.nextCircle,
             ),
-            child: Icon(Icons.notifications, size: 30, color: theme.nextCircleIcon),
+            child: AnimatedBuilder(
+              animation: _swing,
+              builder: (context, _) => Transform.rotate(
+                angle: _swing.value * math.pi / 180,
+                alignment: Alignment.topCenter,
+                child: Icon(
+                  Icons.notifications,
+                  size: 30,
+                  color: theme.nextCircleIcon,
+                ),
+              ),
+            ),
           ),
         ],
       ),
