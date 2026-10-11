@@ -150,14 +150,17 @@ class AlarmActivity : AppCompatActivity() {
 
         val radius = theme.buttonRadiusDp * density
         val btnComplete = findViewById<Button>(R.id.btnComplete)
+        btnComplete.backgroundTintList = null
         btnComplete.background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radius
             setColor(theme.accent)
         }
         btnComplete.setTextColor(theme.onAccent)
+        btnComplete.compoundDrawableTintList = ColorStateList.valueOf(theme.onAccent)
         btnComplete.typeface = bodyFace
         val btnSnooze = findViewById<Button>(R.id.btnSnooze)
+        btnSnooze.backgroundTintList = null
         btnSnooze.background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radius
@@ -165,6 +168,7 @@ class AlarmActivity : AppCompatActivity() {
             setColor(android.graphics.Color.TRANSPARENT)
         }
         btnSnooze.setTextColor(theme.onBackground)
+        btnSnooze.compoundDrawableTintList = ColorStateList.valueOf(theme.onBackground)
         btnSnooze.typeface = bodyFace
     }
 

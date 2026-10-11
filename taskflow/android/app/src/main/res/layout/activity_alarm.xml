@@ -125,7 +125,6 @@
             android:drawableStart="@drawable/ic_check"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
-            android:backgroundTint="#2E7D32"
             android:gravity="center" />
 
         <Button
@@ -140,7 +139,6 @@
             android:drawableStart="@drawable/ic_snooze"
             android:drawablePadding="10dp"
             android:paddingHorizontal="16dp"
-            android:backgroundTint="#80FFFFFF"
             android:gravity="center" />
     </LinearLayout>
 
