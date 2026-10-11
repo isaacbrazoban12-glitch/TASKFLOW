@@ -654,46 +654,106 @@ class _StrikePainter extends CustomPainter {
       old.progress != progress || old.color != color;
 }
 
-/// Botón "Nueva tarea" de ancho completo.
-class NewTaskButton extends StatelessWidget {
+/// Botón "Nueva tarea" de ancho completo con respiración suave
+/// (escala 1.0 a 1.02 en 2.4 s, en bucle).
+class NewTaskButton extends StatefulWidget {
   final VoidCallback onTap;
+  final TickerProvider vsync;
+  final bool paused;
 
-  const NewTaskButton({super.key, required this.onTap});
+  const NewTaskButton({
+    super.key,
+    required this.onTap,
+    required this.vsync,
+    this.paused = false,
+  });
+
+  @override
+  State<NewTaskButton> createState() => _NewTaskButtonState();
+}
+
+class _NewTaskButtonState extends State<NewTaskButton> {
+  late final AnimationController _breathe;
+
+  @override
+  void initState() {
+    super.initState();
+    _breathe = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 2400),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _applyLoop();
+  }
+
+  @override
+  void didUpdateWidget(NewTaskButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.paused != widget.paused) _applyLoop();
+  }
+
+  void _applyLoop() {
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _breathe.stop();
+      _breathe.value = 0;
+    } else if (!_breathe.isAnimating) {
+      _breathe.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _breathe.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        height: 56,
-        decoration: BoxDecoration(
-          color: theme.accent,
-          borderRadius: BorderRadius.circular(theme.buttonRadius),
-          boxShadow: [
-            BoxShadow(
-              color: theme.accent.withValues(alpha: 0.22),
-              offset: const Offset(0, 8),
-              blurRadius: 24,
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _breathe,
+        builder: (context, child) {
+          final t = Curves.easeInOut.transform(_breathe.value);
+          return Transform.scale(scale: 1.0 + 0.02 * t, child: child);
+        },
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              color: theme.accent,
+              borderRadius: BorderRadius.circular(theme.buttonRadius),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.accent.withValues(alpha: 0.22),
+                  offset: const Offset(0, 8),
+                  blurRadius: 24,
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add, size: 20, color: theme.onAccent),
-            const SizedBox(width: 8),
-            Text(
-              'Nueva tarea',
-              style: TextStyle(
-                fontFamily: theme.fontBody,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: theme.onAccent,
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add, size: 20, color: theme.onAccent),
+                const SizedBox(width: 8),
+                Text(
+                  'Nueva tarea',
+                  style: TextStyle(
+                    fontFamily: theme.fontBody,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: theme.onAccent,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

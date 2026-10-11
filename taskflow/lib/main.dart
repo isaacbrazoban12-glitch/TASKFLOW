@@ -794,7 +794,11 @@ class _HomePageState extends State<HomePage>
                           ? 250
                           : 450,
                   vsync: this,
-                  child: NewTaskButton(onTap: () => _openTaskDialog()),
+                  child: NewTaskButton(
+                  onTap: () => _openTaskDialog(),
+                  vsync: this,
+                  paused: _animationsPaused,
+                ),
                 ),
               ),
             ],
