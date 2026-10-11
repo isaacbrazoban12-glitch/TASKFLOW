@@ -361,6 +361,9 @@ class _BorderGlowState extends State<BorderGlow> {
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeScope.of(context);
+    if (MediaQuery.of(context).disableAnimations) {
+      return widget.child;
+    }
     return RepaintBoundary(
       child: AnimatedBuilder(
         animation: _controller,
