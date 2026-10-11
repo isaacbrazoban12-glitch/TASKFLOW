@@ -350,6 +350,9 @@ class TaskCardCustom extends StatefulWidget {
   final TickerProvider vsync;
   final bool paused;
 
+  /// Entrada deslizándose desde arriba (solo al añadir).
+  final bool freshEntry;
+
   const TaskCardCustom({
     super.key,
     required this.task,
@@ -358,6 +361,7 @@ class TaskCardCustom extends StatefulWidget {
     required this.onToggle,
     required this.vsync,
     this.paused = false,
+    this.freshEntry = false,
   });
 
   @override
@@ -366,7 +370,9 @@ class TaskCardCustom extends StatefulWidget {
 
 class _TaskCardCustomState extends State<TaskCardCustom> {
   late final AnimationController _controller;
+  late final AnimationController _entry;
   late bool _shownDone;
+  bool _entryPlayed = false;
 
   @override
   void initState() {
@@ -380,6 +386,11 @@ class _TaskCardCustomState extends State<TaskCardCustom> {
     _controller.addStatusListener((_) {
       if (mounted) setState(() {});
     });
+    _entry = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 350),
+      value: 1,
+    );
   }
 
   @override
@@ -387,6 +398,15 @@ class _TaskCardCustomState extends State<TaskCardCustom> {
     super.didChangeDependencies();
     if (MediaQuery.of(context).disableAnimations) {
       _controller.value = _shownDone ? 1 : 0;
+    }
+    if (widget.freshEntry && !_entryPlayed) {
+      _entryPlayed = true;
+      if (MediaQuery.of(context).disableAnimations) {
+        _entry.value = 1;
+      } else {
+        _entry.value = 0;
+        _entry.forward();
+      }
     }
   }
 
@@ -420,6 +440,7 @@ class _TaskCardCustomState extends State<TaskCardCustom> {
   @override
   void dispose() {
     _controller.dispose();
+    _entry.dispose();
     super.dispose();
   }
 
@@ -434,9 +455,20 @@ class _TaskCardCustomState extends State<TaskCardCustom> {
     final doneDecoration = (_shownDone && _controller.isCompleted)
         ? TextDecoration.lineThrough
         : null;
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: Container(
+    return AnimatedBuilder(
+      animation: _entry,
+      builder: (context, child) {
+        final t = Curves.easeOutCubic.transform(_entry.value);
+        return RepaintBoundary(
+          child: Transform.translate(
+            offset: Offset(0, -24 * (1 - t)),
+            child: Opacity(opacity: t, child: child),
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: theme.card,
@@ -551,6 +583,7 @@ class _TaskCardCustomState extends State<TaskCardCustom> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -709,6 +742,143 @@ class UndoBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Desliz para borrar propio: arrastra a la izquierda; al soltar pasado el
+/// umbral se encoge y se desvanece en 200 ms y luego avisa con [onDelete].
+class SwipeDelete extends StatefulWidget {
+  final Widget child;
+  final Widget background;
+  final VoidCallback onDelete;
+  final TickerProvider vsync;
+  final bool paused;
+
+  const SwipeDelete({
+    super.key,
+    required this.child,
+    required this.background,
+    required this.onDelete,
+    required this.vsync,
+    this.paused = false,
+  });
+
+  @override
+  State<SwipeDelete> createState() => _SwipeDeleteState();
+}
+
+class _SwipeDeleteState extends State<SwipeDelete> {
+  double _dragX = 0;
+  bool _collapsing = false;
+  late final AnimationController _collapse;
+  late final AnimationController _springBack;
+
+  @override
+  void initState() {
+    super.initState();
+    _collapse = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 200),
+    );
+    _springBack = AnimationController(
+      vsync: widget.vsync,
+      duration: const Duration(milliseconds: 150),
+    );
+  }
+
+  @override
+  void dispose() {
+    _collapse.dispose();
+    _springBack.dispose();
+    super.dispose();
+  }
+
+  void _onUpdate(DragUpdateDetails details, double width) {
+    if (_collapsing) return;
+    setState(() {
+      _dragX = (_dragX + details.delta.dx).clamp(-width, 0.0);
+    });
+  }
+
+  void _onEnd(double width) {
+    if (_collapsing) return;
+    final threshold = width * 0.4;
+    if (-_dragX >= threshold) {
+      _collapsing = true;
+      if (MediaQuery.of(context).disableAnimations || widget.paused) {
+        widget.onDelete();
+        return;
+      }
+      _collapse.forward().whenComplete(() {
+        if (mounted) widget.onDelete();
+      });
+      setState(() {});
+    } else {
+      _returnBack();
+    }
+  }
+
+  Animation<double>? _backAnim;
+
+  void _returnBack() {
+    final from = _dragX;
+    if (MediaQuery.of(context).disableAnimations || widget.paused) {
+      _dragX = 0;
+      setState(() {});
+      return;
+    }
+    _backAnim = Tween<double>(begin: from, end: 0).animate(
+      CurvedAnimation(parent: _springBack, curve: Curves.easeOut),
+    );
+    _springBack.removeListener(_tickBack);
+    _springBack.addListener(_tickBack);
+    _springBack.forward(from: 0).whenComplete(() {
+      _springBack.removeListener(_tickBack);
+    });
+  }
+
+  void _tickBack() {
+    final anim = _backAnim;
+    if (!mounted || anim == null) return;
+    setState(() => _dragX = anim.value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return GestureDetector(
+          onHorizontalDragUpdate: (details) => _onUpdate(details, width),
+          onHorizontalDragEnd: (_) => _onEnd(width),
+          child: Stack(
+            children: [
+              Positioned.fill(child: widget.background),
+              AnimatedBuilder(
+                animation: _collapse,
+                builder: (context, child) {
+                  final t = _collapse.value;
+                  return ClipRect(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      heightFactor: (1 - t).clamp(0.0, 1.0),
+                      child: Opacity(
+                        opacity: 1 - t,
+                        child: Transform.translate(
+                          offset: Offset(_collapsing ? 0 : _dragX, 0),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                child: RepaintBoundary(child: widget.child),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

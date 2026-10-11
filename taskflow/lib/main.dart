@@ -98,6 +98,7 @@ class _HomePageState extends State<HomePage>
   Task? _pendingDelete;
   Timer? _deleteTimer;
   bool _animationsPaused = false;
+  int? _justAddedId;
 
   @override
   void initState() {
@@ -537,6 +538,12 @@ class _HomePageState extends State<HomePage>
       builder: (_) => TaskFormDialog(task: task),
     );
     if (result != null) {
+      if (task == null && result.id != null) {
+        setState(() => _justAddedId = result.id);
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) setState(() => _justAddedId = null);
+        });
+      }
       await _loadTasks();
     }
   }
@@ -722,23 +729,27 @@ class _HomePageState extends State<HomePage>
                   itemBuilder: (context, index) {
                     final task = visible[index];
                     final done = task.isEffectivelyCompleted(DateTime.now());
-                    return entrance(
-                      4 + index,
-                      Dismissible(
-                        key: ValueKey('task-${task.id}'),
-                        direction: DismissDirection.endToStart,
-                        background: _DismissBackground(),
-                        onDismissed: (_) => _requestDelete(task),
-                      child: TaskCardCustom(
-                        task: task,
-                        done: done,
-                        onTap: () => _openTaskDialog(task: task),
-                        onToggle: () => _toggleTask(task),
-                        vsync: this,
-                        paused: _animationsPaused,
-                      ),
-                      ),
+                    final fresh = task.id != null && task.id == _justAddedId;
+                    final card = TaskCardCustom(
+                      key: ValueKey('card-${task.id}'),
+                      task: task,
+                      done: done,
+                      onTap: () => _openTaskDialog(task: task),
+                      onToggle: () => _toggleTask(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      freshEntry: fresh,
                     );
+                    final swiped = SwipeDelete(
+                      key: ValueKey('task-${task.id}'),
+                      background: _DismissBackground(),
+                      onDelete: () => _requestDelete(task),
+                      vsync: this,
+                      paused: _animationsPaused,
+                      child: card,
+                    );
+                    if (fresh) return swiped;
+                    return entrance(4 + index, swiped);
                   },
                 ),
         ),
