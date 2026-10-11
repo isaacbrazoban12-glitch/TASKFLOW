@@ -52,8 +52,12 @@ void main() {
     await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Mis Tareas'), findsOneWidget);
-    expect(find.byIcon(Icons.add), findsOneWidget);
+    expect(find.text('Nueva tarea'), findsOneWidget);
+    expect(find.byIcon(Icons.tune), findsOneWidget);
+    expect(
+      find.text('Aún no tienes tareas.\nToca + para agregar una.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Empty state shows message', (WidgetTester tester) async {
@@ -71,7 +75,10 @@ void main() {
     await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Regar plantas'), findsOneWidget);
+    expect(find.text('Regar plantas'), findsNWidgets(2));
+    expect(find.text('SIGUIENTE ALARMA'), findsOneWidget);
+    expect(find.text('Tus tareas'), findsOneWidget);
+    expect(find.text('Lun'), findsOneWidget);
     expect(
       find.text('Aún no tienes tareas.\nToca + para agregar una.'),
       findsNothing,
@@ -86,10 +93,13 @@ void main() {
     await tester.pumpWidget(TaskFlowApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(Checkbox));
+    await tester.tap(find.byKey(const ValueKey('check-1')));
     await tester.pumpAndSettle();
 
-    final text = tester.widget<Text>(find.text('Estudiar'));
-    expect(text.style?.decoration, TextDecoration.lineThrough);
+    final texts = tester.widgetList<Text>(find.text('Estudiar'));
+    expect(
+      texts.any((t) => t.style?.decoration == TextDecoration.lineThrough),
+      isTrue,
+    );
   });
 }

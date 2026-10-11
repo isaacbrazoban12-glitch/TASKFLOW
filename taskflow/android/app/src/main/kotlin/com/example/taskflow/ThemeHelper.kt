@@ -18,7 +18,13 @@ data class AlarmTheme(
     val accent: Int,
     val onAccent: Int,
     val onBackground: Int,
-    val isDark: Boolean
+    val isDark: Boolean,
+    val label: Int,
+    val hour: Int,
+    val secondaryBorder: Int,
+    val fontHour: Int,
+    val fontBody: Int,
+    val buttonRadiusDp: Float
 )
 
 object ThemeHelper {
@@ -30,7 +36,13 @@ object ThemeHelper {
             Color.parseColor("#C93C74"),
             Color.WHITE,
             Color.parseColor("#1C1B1F"),
-            false
+            false,
+            Color.parseColor("#C93C74"),
+            Color.parseColor("#2B2036"),
+            Color.parseColor("#D9B8CB"),
+            R.font.bricolage_800,
+            R.font.jakarta_500,
+            999f
         ),
         "medianoche" to AlarmTheme(
             "medianoche",
@@ -38,7 +50,13 @@ object ThemeHelper {
             Color.parseColor("#22D3EE"),
             Color.parseColor("#101418"),
             Color.parseColor("#E6E1E5"),
-            true
+            true,
+            Color.parseColor("#22D3EE"),
+            Color.parseColor("#F1F5F9"),
+            Color.parseColor("#3A4A66"),
+            R.font.jetbrainsmono_500,
+            R.font.spacegrotesk_500,
+            16f
         ),
         "grafito" to AlarmTheme(
             "grafito",
@@ -46,7 +64,13 @@ object ThemeHelper {
             Color.parseColor("#C2410C"),
             Color.WHITE,
             Color.parseColor("#1C1B1F"),
-            false
+            false,
+            Color.parseColor("#FDBA74"),
+            Color.parseColor("#FFFFFF"),
+            Color.parseColor("#59636F"),
+            R.font.archivo_800,
+            R.font.archivo_500,
+            14f
         ),
         "bosque" to AlarmTheme(
             "bosque",
@@ -54,7 +78,13 @@ object ThemeHelper {
             Color.parseColor("#BEF264"),
             Color.parseColor("#101418"),
             Color.parseColor("#E6E1E5"),
-            true
+            true,
+            Color.parseColor("#BEF264"),
+            Color.parseColor("#E9DFC7"),
+            Color.parseColor("#3F6650"),
+            R.font.manrope_800,
+            R.font.manrope_600,
+            32f
         )
     )
 
