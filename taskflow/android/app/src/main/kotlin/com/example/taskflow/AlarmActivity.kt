@@ -18,7 +18,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
+import android.os.VibrationAttributes
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
@@ -45,6 +47,7 @@ class AlarmActivity : AppCompatActivity() {
     private val autoSilence = Runnable { stopAlarmSoundAndVibration() }
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var vibrationKeeper: Runnable? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeTicker: Runnable? = null
     private val animHandler = Handler(Looper.getMainLooper())
@@ -419,13 +422,63 @@ class AlarmActivity : AppCompatActivity() {
             Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
         }
         if (!SoundHelper.vibrateEnabled(this)) return
+        vibrator = obtainVibrator()
+        startVibration()
+        // Vigilante: algunos sistemas (HyperOS/MIUI, ahorro de energía, al
+        // encender la pantalla) cortan la vibración aunque sea en bucle.
+        // Se vuelve a lanzar cada pocos segundos mientras suene la alarma.
+        vibrationKeeper = object : Runnable {
+            override fun run() {
+                if (vibrator == null) return
+                startVibration()
+                timeHandler.postDelayed(this, VIBRATION_REFRESH_MS)
+            }
+        }
+        timeHandler.postDelayed(vibrationKeeper!!, VIBRATION_REFRESH_MS)
+    }
+
+    private fun obtainVibrator(): Vibrator? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    } catch (e: Exception) {
+        Log.e("AlarmActivity", "Sin vibrador: $e")
+        null
+    }
+
+    /**
+     * Vibración continua (900 ms sí / 400 ms no, sin fin) marcada como
+     * ALARMA: así el sistema la respeta en modo silencio y no la corta como
+     * una vibración normal de app.
+     */
+    private fun startVibration() {
+        val v = vibrator ?: return
         try {
-            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500, 1000), 0))
+                val timings = longArrayOf(0, 900, 400)
+                val effect = if (v.hasAmplitudeControl()) {
+                    VibrationEffect.createWaveform(timings, intArrayOf(0, 255, 0), 1)
+                } else {
+                    VibrationEffect.createWaveform(timings, 1)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+                } else {
+                    @Suppress("DEPRECATION")
+                    v.vibrate(
+                        effect,
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                }
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(longArrayOf(0, 1000, 500, 1000), 0)
+                v.vibrate(longArrayOf(0, 900, 400), 1)
             }
         } catch (e: Exception) {
             Log.e("AlarmActivity", "No se pudo vibrar: $e")
@@ -469,11 +522,18 @@ class AlarmActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
         mediaPlayer = null
+        vibrationKeeper?.let { timeHandler.removeCallbacks(it) }
+        vibrationKeeper = null
+        val v = vibrator
+        vibrator = null
         try {
-            vibrator?.cancel()
+            v?.cancel()
         } catch (_: Exception) {
         }
-        vibrator = null
+    }
+
+    companion object {
+        private const val VIBRATION_REFRESH_MS = 8_000L
     }
 
     override fun onStop() {
