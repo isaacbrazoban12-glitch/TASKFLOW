@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
@@ -40,6 +41,7 @@ class AlarmActivity : AppCompatActivity() {
     private var taskTitle: String = "Tarea"
     private var alarmId: Int = 0
     private var stopsOnComplete: Boolean = false
+    private var crescendo: Runnable? = null
     private val autoSilence = Runnable { stopAlarmSoundAndVibration() }
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
@@ -52,6 +54,9 @@ class AlarmActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Los botones físicos de volumen controlan el volumen de ALARMA
+        // mientras suena (antes movían otro canal y "no hacían nada").
+        volumeControlStream = AudioManager.STREAM_ALARM
 
         setupWindowFlags()
 
@@ -112,7 +117,10 @@ class AlarmActivity : AppCompatActivity() {
         startAlarmAnimation()
         // Como un despertador: si nadie responde, se silencia a los 10 minutos
         // (la pantalla sigue visible) para no agotar la batería.
-        timeHandler.postDelayed(autoSilence, AUTO_SILENCE_MS)
+        timeHandler.postDelayed(
+            autoSilence,
+            SoundHelper.autoSilenceMinutes(this) * 60_000L
+        )
     }
 
     /**
@@ -395,25 +403,22 @@ class AlarmActivity : AppCompatActivity() {
 
     private fun startAlarmSoundAndVibration() {
         try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            if (uri != null) {
-                mediaPlayer = MediaPlayer().apply {
-                    setDataSource(this@AlarmActivity, uri)
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    isLooping = true
-                    prepare()
-                    start()
+            SoundHelper.ensureAudible(this)
+            // Sonido elegido para la tarea (o el predeterminado); si falla,
+            // createPlayer cae en la alarma del sistema.
+            val sound = SoundHelper.soundForTask(this, taskId)
+            mediaPlayer = SoundHelper.createPlayer(this, sound)?.also { player ->
+                if (SoundHelper.crescendoEnabled(this)) {
+                    startCrescendo(player)
+                } else {
+                    player.setVolume(1f, 1f)
                 }
+                player.start()
             }
         } catch (e: Exception) {
             Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
         }
+        if (!SoundHelper.vibrateEnabled(this)) return
         try {
             vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -427,7 +432,34 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Subida gradual: empieza al 10 % y llega al 100 % en 30 segundos.
+     * Es volumen relativo del reproductor; los botones físicos siguen
+     * controlando el volumen de alarma del sistema.
+     */
+    private fun startCrescendo(player: MediaPlayer) {
+        val steps = 30
+        var step = 0
+        player.setVolume(0.1f, 0.1f)
+        crescendo = object : Runnable {
+            override fun run() {
+                if (mediaPlayer !== player) return
+                step++
+                val v = (0.1f + 0.9f * step / steps).coerceAtMost(1f)
+                try {
+                    player.setVolume(v, v)
+                } catch (_: Exception) {
+                    return
+                }
+                if (step < steps) timeHandler.postDelayed(this, 1000)
+            }
+        }
+        timeHandler.postDelayed(crescendo!!, 1000)
+    }
+
     private fun stopAlarmSoundAndVibration() {
+        crescendo?.let { timeHandler.removeCallbacks(it) }
+        crescendo = null
         try {
             mediaPlayer?.stop()
         } catch (_: Exception) {
@@ -512,17 +544,18 @@ class AlarmActivity : AppCompatActivity() {
         finish()
     }
 
+    // Dart guarda los enteros como Long en Android: getInt() lanzaría
+    // ClassCastException si el contador lo escribió el diálogo de Dart.
     private fun getSnoozeCount(taskId: Int, weekday: Int): Int {
-        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val key = "flutter.alarm_dismiss_${taskId}_${weekday}_${getCurrentYearMonthDay()}"
-        return prefs.getInt(key, 0)
+        return SoundHelper.readInt(this, key, 0)
     }
 
     private fun incrementSnoozeCount(taskId: Int, weekday: Int) {
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val key = "flutter.alarm_dismiss_${taskId}_${weekday}_${getCurrentYearMonthDay()}"
-        val current = prefs.getInt(key, 0)
-        prefs.edit().putInt(key, current + 1).apply()
+        val current = SoundHelper.readInt(this, key, 0)
+        prefs.edit().putLong(key, (current + 1).toLong()).apply()
     }
 
     private fun getCurrentYearMonthDay(): String {
@@ -541,7 +574,4 @@ class AlarmActivity : AppCompatActivity() {
         // No permitir cerrar con botón atrás: hay que Completar o Posponer.
     }
 
-    companion object {
-        private const val AUTO_SILENCE_MS = 10L * 60 * 1000
-    }
 }

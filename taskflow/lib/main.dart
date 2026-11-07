@@ -12,7 +12,9 @@ import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/entrance.dart';
+import 'sound_service.dart';
 import 'widgets/home_header.dart';
+import 'widgets/root_shell.dart';
 import 'widgets/theme_decorations.dart';
 import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
@@ -70,7 +72,9 @@ class _TaskFlowAppState extends State<TaskFlowApp> {
           theme: appThemeOf(widget.themeController.current).data,
           home: AppThemeScope(
             theme: appThemeOf(widget.themeController.current),
-            child: HomePage(themeController: widget.themeController),
+            child: RootShell(
+              home: HomePage(themeController: widget.themeController),
+            ),
           ),
         );
       },
@@ -123,6 +127,7 @@ class _HomePageState extends State<HomePage>
     if (pending?.id != null) {
       _db.deleteTask(pending!.id!);
       NotificationService.instance.cancelTask(pending.id!);
+      SoundService.instance.removeTaskSound(pending.id!);
     }
     super.dispose();
   }
@@ -159,6 +164,8 @@ class _HomePageState extends State<HomePage>
       final tasks = await _db.getTasks();
       for (final task in tasks) {
         if (task.id == null) continue;
+        // La alarma nativa lee el sonido de la tarea desde preferencias.
+        await SoundService.instance.syncTaskSound(task.id!, task.sound);
         // Solo las detenidas (no se repiten o con stopOnComplete) pierden sus
         // alarmas. Una repetitiva sin stop completada solo marcó la ocurrencia
         // (completedAt) y sus futuras alarmas siguen activas.
@@ -457,6 +464,15 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _applyCompletion(Task task, bool completed) async {
+    if (completed) {
+      // Historial para la sección Progreso. Un fallo aquí no debe impedir
+      // completar la tarea.
+      try {
+        await _db.logCompletion(task, DateTime.now().millisecondsSinceEpoch);
+      } catch (e) {
+        debugPrint('[HomePage] No se pudo guardar el historial: $e');
+      }
+    }
     // Repetitiva sin stopOnComplete: completar solo marca la ocurrencia actual
     // (fecha) y las alarmas futuras siguen activas.
     if (completed && !task.stopsOnComplete) {
@@ -615,6 +631,7 @@ class _HomePageState extends State<HomePage>
     try {
       await _db.deleteTask(task.id!);
       await NotificationService.instance.cancelTask(task.id!);
+      await SoundService.instance.removeTaskSound(task.id!);
     } catch (e) {
       debugPrint('[HomePage] Error al eliminar tarea: $e');
     }

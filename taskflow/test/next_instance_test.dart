@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taskflow/app_themes.dart';
 import 'package:taskflow/database/database_helper.dart';
 import 'package:taskflow/notification_service.dart';
@@ -49,6 +50,7 @@ void main() {
     late FakeDatabaseHelper db;
 
     setUp(() {
+      SharedPreferences.setMockInitialValues({});
       db = FakeDatabaseHelper();
       DatabaseHelper.instance = db;
     });

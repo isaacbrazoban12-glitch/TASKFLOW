@@ -5,6 +5,8 @@ import '../app_themes.dart';
 import '../database/database_helper.dart';
 import '../models/task.dart';
 import '../notification_service.dart';
+import '../sound_service.dart';
+import 'sound_picker.dart';
 
 /// Longitud máxima del título: se muestra en notificaciones y en la alarma
 /// nativa, así que se limita para que no rompa el diseño ni los extras.
@@ -49,11 +51,17 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
   late bool _repeats;
   late bool _stopOnComplete;
   bool _saving = false;
+  String? _sound;
+  String _soundName = 'Predeterminado de la app';
 
   @override
   void initState() {
     super.initState();
     final task = widget.task;
+    _sound = task?.sound;
+    SoundService.instance.labelFor(_sound).then((name) {
+      if (mounted) setState(() => _soundName = name);
+    });
     _titleController = TextEditingController(text: task?.title ?? '');
     _selectedDays = [...?task?.weekdays];
     final now = TimeOfDay.now();
@@ -102,6 +110,8 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       // "Se detiene" no tiene sentido si la tarea no se repite.
       stopOnComplete: _repeats && _stopOnComplete,
       completed: widget.task?.completed ?? false,
+      sound: _sound,
+      clearSound: _sound == null,
     );
 
     final db = DatabaseHelper.instance;
@@ -114,6 +124,9 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       } else {
         await db.updateTask(baseTask);
         savedTask = baseTask;
+      }
+      if (savedTask.id != null) {
+        await SoundService.instance.syncTaskSound(savedTask.id!, savedTask.sound);
       }
 
       // Editar una tarea detenida (completada sin repetición o con stop)
@@ -146,6 +159,22 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     if (picked != null && mounted) {
       setState(() => _selectedTime = picked);
     }
+  }
+
+  Future<void> _pickSound() async {
+    final picked = await showSoundPicker(
+      context,
+      theme: AppThemeScope.of(context),
+      current: _sound,
+      allowAppDefault: true,
+    );
+    if (picked == null || !mounted) return;
+    final name = await SoundService.instance.labelFor(picked.id);
+    if (!mounted) return;
+    setState(() {
+      _sound = picked.id;
+      _soundName = name;
+    });
   }
 
   void _toggleDay(int day) {
@@ -339,6 +368,28 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                           onChanged: _repeats
                               ? (v) => setState(() => _stopOnComplete = v)
                               : null,
+                        ),
+                        Divider(height: 1, color: theme.border),
+                        ListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                          leading: Icon(Icons.music_note_rounded, color: theme.accent),
+                          title: Text(
+                            'Sonido',
+                            style: TextStyle(
+                              fontFamily: theme.fontBody,
+                              fontWeight: FontWeight.w600,
+                              color: theme.text,
+                            ),
+                          ),
+                          subtitle: Text(
+                            _soundName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: theme.muted, fontSize: 13),
+                          ),
+                          trailing: Icon(Icons.chevron_right_rounded, color: theme.muted),
+                          onTap: _pickSound,
                         ),
                       ],
                     ),

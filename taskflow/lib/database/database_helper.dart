@@ -2,7 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../models/completion.dart';
 import '../models/task.dart';
+
+export '../models/completion.dart';
 import '../platform_info.dart';
 
 class DatabaseHelper {
@@ -35,7 +38,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDb,
       onUpgrade: _upgradeDb,
     );
@@ -52,9 +55,25 @@ class DatabaseHelper {
         repeats INTEGER NOT NULL DEFAULT 1,
         stopOnComplete INTEGER NOT NULL DEFAULT 0,
         completed INTEGER NOT NULL DEFAULT 0,
-        completedAt INTEGER NULL
+        completedAt INTEGER NULL,
+        sound TEXT NULL
       )
     ''');
+    await _createCompletions(db);
+  }
+
+  /// Historial de completados (para la sección Progreso).
+  Future<void> _createCompletions(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS completions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        taskId INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_completions_at ON completions(at)');
   }
 
   Future<void> _upgradeDb(Database db, int oldVersion, int newVersion) async {
@@ -72,6 +91,33 @@ class DatabaseHelper {
         where: 'repeats = 1 AND stopOnComplete = 0 AND completed = 1',
       );
     }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN sound TEXT NULL');
+      await _createCompletions(db);
+    }
+  }
+
+  /// Registra que [task] se completó en [at] (ms desde época).
+  Future<void> logCompletion(Task task, int at) async {
+    if (task.id == null) return;
+    final db = await database;
+    await db.insert('completions', {
+      'taskId': task.id,
+      'title': task.title,
+      'at': at,
+    });
+  }
+
+  /// Completados desde [sinceMs] (incluido), del más reciente al más antiguo.
+  Future<List<Completion>> getCompletionsSince(int sinceMs) async {
+    final db = await database;
+    final rows = await db.query(
+      'completions',
+      where: 'at >= ?',
+      whereArgs: [sinceMs],
+      orderBy: 'at DESC',
+    );
+    return rows.map(Completion.fromMap).toList();
   }
 
   Future<int> insertTask(Task task) async {

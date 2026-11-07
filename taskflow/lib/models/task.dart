@@ -9,6 +9,10 @@ class Task {
   final bool completed;
   final int? completedAt;
 
+  /// Sonido de alarma de esta tarea (ver `SoundService`); null = el
+  /// predeterminado de la app.
+  final String? sound;
+
   const Task({
     this.id,
     required this.title,
@@ -19,6 +23,7 @@ class Task {
     this.stopOnComplete = false,
     this.completed = false,
     this.completedAt,
+    this.sound,
   });
 
   bool get hasValidDays => weekdays.isNotEmpty;
@@ -77,6 +82,7 @@ class Task {
       'stopOnComplete': stopOnComplete ? 1 : 0,
       'completed': completed ? 1 : 0,
       'completedAt': completedAt,
+      'sound': sound,
     };
   }
 
@@ -110,6 +116,9 @@ class Task {
       stopOnComplete: map['stopOnComplete'] == 1 || map['stopOnComplete'] == true,
       completed: map['completed'] == 1 || map['completed'] == true,
       completedAt: (map['completedAt'] as num?)?.toInt(),
+      sound: (map['sound'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : map['sound'] as String,
     );
   }
 
@@ -124,6 +133,8 @@ class Task {
     bool? completed,
     int? completedAt,
     bool clearCompletedAt = false,
+    String? sound,
+    bool clearSound = false,
   }) {
     return Task(
       id: id ?? this.id,
@@ -135,6 +146,7 @@ class Task {
       stopOnComplete: stopOnComplete ?? this.stopOnComplete,
       completed: completed ?? this.completed,
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      sound: clearSound ? null : (sound ?? this.sound),
     );
   }
 }

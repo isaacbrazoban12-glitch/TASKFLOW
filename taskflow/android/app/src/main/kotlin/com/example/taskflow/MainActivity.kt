@@ -36,8 +36,70 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private var pendingPick: MethodChannel.Result? = null
+
+    @Deprecated("FlutterActivity no es ComponentActivity: se usa la API clásica")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PICK_AUDIO) return
+        val result = pendingPick ?: return
+        pendingPick = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            result.success(null)
+            return
+        }
+        result.success(SoundHelper.onAudioPicked(this, uri))
+    }
+
+    private fun configureSoundChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SOUND_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "listSystemSounds" -> result.success(SoundHelper.listSystemSounds(this))
+                    "pickAudio" -> {
+                        // Una sola selección a la vez.
+                        pendingPick?.success(null)
+                        pendingPick = result
+                        try {
+                            @Suppress("DEPRECATION")
+                            startActivityForResult(SoundHelper.pickAudioIntent(), REQUEST_PICK_AUDIO)
+                        } catch (e: Exception) {
+                            pendingPick = null
+                            result.error("no_picker", "No hay selector de archivos", null)
+                        }
+                    }
+                    "releaseAudio" -> {
+                        call.argument<String>("id")?.let { SoundHelper.releaseAudio(this, it) }
+                        result.success(true)
+                    }
+                    "preview" -> {
+                        SoundHelper.preview(this, call.argument<String>("id"))
+                        result.success(true)
+                    }
+                    "stopPreview" -> {
+                        SoundHelper.stopPreview()
+                        result.success(true)
+                    }
+                    "getAlarmVolume" -> result.success(SoundHelper.alarmVolume(this))
+                    "setAlarmVolume" -> {
+                        SoundHelper.setAlarmVolume(this, call.argument<Int>("value") ?: 0)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onPause() {
+        SoundHelper.stopPreview()
+        super.onPause()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        configureSoundChannel(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -121,6 +183,8 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val CHANNEL = "taskflow/alarm"
+        const val SOUND_CHANNEL = "taskflow/sound"
+        private const val REQUEST_PICK_AUDIO = 4711
         const val EXTRA_ALARM_ID = "alarm_id"
         const val EXTRA_TITLE = "alarm_title"
         const val EXTRA_TASK_ID = "alarm_task_id"

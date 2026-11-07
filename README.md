@@ -21,6 +21,20 @@ con acciones Completar y Posponer (5 min, máximo 3 veces al día).
 | Escritorio (Windows/Linux/macOS) | Sí, como lista | No hay alarmas del sistema (aviso en app) |
 | Web | Compila y abre, con aviso | No disponibles y sin guardado local |
 
+## Secciones
+
+- **Tareas**: lista, franja semanal, próxima alarma y formulario de tarea
+  (hora, días con atajos, repetición y sonido propio por tarea).
+- **Sonidos**: volumen de alarma, sonido predeterminado, subida gradual,
+  vibración, silencio automático (5/10/15/30 min), **Mi música** (canciones
+  del teléfono vía selector de archivos, con permiso de solo lectura) y 11
+  sonidos propios (`res/raw/tf_*.wav`, generados con `tool/generate_sounds.py`).
+- **Progreso**: completadas esta semana, racha de días, gráfica de 7 días,
+  agenda semanal e historial (tabla `completions`, BD v3).
+
+Mientras suena la alarma, los botones físicos controlan el **volumen de alarma**.
+Si el sonido elegido ya no existe, suena la alarma del sistema.
+
 ## Requisitos
 
 - Flutter estable reciente (probado con 3.47.2, Dart 3.13.2).
