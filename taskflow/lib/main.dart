@@ -101,6 +101,7 @@ class _HomePageState extends State<HomePage>
   Timer? _deleteTimer;
   bool _firstLoadDone = false;
   bool _animationsPaused = false;
+  bool _applyingPending = false;
   int? _justAddedId;
 
   @override
@@ -116,6 +117,13 @@ class _HomePageState extends State<HomePage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _deleteTimer?.cancel();
+    // Un borrado pendiente (barra Deshacer) se confirma igualmente.
+    final pending = _pendingDelete;
+    _pendingDelete = null;
+    if (pending?.id != null) {
+      _db.deleteTask(pending!.id!);
+      NotificationService.instance.cancelTask(pending.id!);
+    }
     super.dispose();
   }
 
@@ -331,7 +339,9 @@ class _HomePageState extends State<HomePage>
           FilledButton(
             onPressed: () async {
               Navigator.pop(context);
-              await NotificationService.instance.checkPermissions();
+              // Antes llamaba a checkPermissions (solo consulta, sin diálogo)
+              // y el botón no hacía nada.
+              await NotificationService.instance.requestPermissions();
             },
             child: const Text('Otorgar permiso'),
           ),
@@ -493,6 +503,9 @@ class _HomePageState extends State<HomePage>
   /// Aplica en Dart las acciones que AlarmActivity ya aplicó en nativo.
   /// Un snooze vencido se ignora (ya sonó; la marca se autolimpia al leerla).
   Future<void> _applyPendingAlarmActions() async {
+    // Arranque y reanudar pueden llamarla a la vez: una sola en curso.
+    if (_applyingPending) return;
+    _applyingPending = true;
     try {
       final pending = await NotificationService.instance.consumePendingAlarmActions();
       if (pending.isEmpty) return;
@@ -514,16 +527,22 @@ class _HomePageState extends State<HomePage>
       }
     } catch (e) {
       debugPrint('[HomePage] Error aplicando acciones pendientes: $e');
+    } finally {
+      _applyingPending = false;
     }
   }
 
   Future<void> _loadTasks() async {
-    setState(() => _isLoading = true);
+    if (!mounted) return;
+    // _isLoading empieza en true: el indicador solo sale en la primera carga.
+    // Recargar tras completar o editar ya no hace parpadear toda la pantalla.
     try {
       final tasks = await _db.getTasks();
       if (!mounted) return;
+      final hiddenId = _pendingDelete?.id;
       setState(() {
-        _tasks = tasks;
+        // Una tarea en "Deshacer" no debe reaparecer al recargar la lista.
+        _tasks = tasks.where((t) => hiddenId == null || t.id != hiddenId).toList();
         _isLoading = false;
       });
       // La entrada en cascada solo corre en la primera carga.
@@ -542,9 +561,10 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _openTaskDialog({Task? task}) async {
-    final result = await showDialog<Task>(
-      context: context,
-      builder: (_) => TaskFormDialog(task: task),
+    final result = await showTaskForm(
+      context,
+      theme: AppThemeScope.of(context),
+      task: task,
     );
     if (result != null) {
       if (task == null && result.id != null) {

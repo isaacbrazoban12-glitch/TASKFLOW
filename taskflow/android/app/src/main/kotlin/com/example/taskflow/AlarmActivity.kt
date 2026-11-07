@@ -39,6 +39,8 @@ class AlarmActivity : AppCompatActivity() {
     private var weekday: Int = 1
     private var taskTitle: String = "Tarea"
     private var alarmId: Int = 0
+    private var stopsOnComplete: Boolean = false
+    private val autoSilence = Runnable { stopAlarmSoundAndVibration() }
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private val timeHandler = Handler(Looper.getMainLooper())
@@ -59,6 +61,7 @@ class AlarmActivity : AppCompatActivity() {
         weekday = intent.getIntExtra(MainActivity.EXTRA_WEEKDAY, 1)
         taskTitle = intent.getStringExtra(MainActivity.EXTRA_TITLE) ?: "Tarea"
         alarmId = intent.getIntExtra(MainActivity.EXTRA_ALARM_ID, 0)
+        stopsOnComplete = intent.getBooleanExtra(MainActivity.EXTRA_STOPS_ON_COMPLETE, false)
 
         val tvTime = findViewById<TextView>(R.id.tvTime)
         val tvTaskTitle = findViewById<TextView>(R.id.tvTaskTitle)
@@ -99,13 +102,31 @@ class AlarmActivity : AppCompatActivity() {
         }
 
         btnSnooze.setOnClickListener {
-            incrementSnoozeCount(taskId, weekday)
+            // El contador se incrementa una sola vez dentro de finishWithAction
+            // (antes se sumaba dos veces y solo se podía posponer 2 veces, no 3).
             finishWithAction("snoozed")
         }
 
         applyTheme(ThemeHelper.currentTheme(this))
         startAlarmSoundAndVibration()
         startAlarmAnimation()
+        // Como un despertador: si nadie responde, se silencia a los 10 minutos
+        // (la pantalla sigue visible) para no agotar la batería.
+        timeHandler.postDelayed(autoSilence, AUTO_SILENCE_MS)
+    }
+
+    /**
+     * Otra alarma dispara mientras esta suena (singleTop): se muestra la más
+     * reciente en lugar de ignorarla en silencio.
+     */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        stopAlarmAnimation()
+        stopAlarmSoundAndVibration()
+        timeHandler.removeCallbacks(autoSilence)
+        timeTicker?.let { timeHandler.removeCallbacks(it) }
+        recreate()
     }
 
     /**
@@ -432,6 +453,7 @@ class AlarmActivity : AppCompatActivity() {
         stopAlarmAnimation()
         timeTicker?.let { timeHandler.removeCallbacks(it) }
         timeTicker = null
+        timeHandler.removeCallbacks(autoSilence)
         stopAlarmSoundAndVibration()
         super.onDestroy()
     }
@@ -472,14 +494,19 @@ class AlarmActivity : AppCompatActivity() {
         if (action == "snoozed") {
             incrementSnoozeCount(taskId, weekday)
             val triggerAt = System.currentTimeMillis() + 5L * 60 * 1000
-            val snoozeId = taskId * 10 + weekday + 100000
-            NativeAlarmHelper.scheduleAlarm(this, snoozeId, taskTitle, taskId, weekday, false, triggerAt)
+            val snoozeId = taskId * 10 + weekday + NativeAlarmHelper.SNOOZE_OFFSET
+            NativeAlarmHelper.scheduleAlarm(
+                this, snoozeId, taskTitle, taskId, weekday, false, triggerAt, stopsOnComplete
+            )
             // Marca para que Dart no toque nada aunque tarde en arrancar.
             getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                 .edit().putLong("flutter.snooze_deadline_$taskId", triggerAt).apply()
             NativeAlarmHelper.storePendingAction(this, "snoozed", taskId, weekday, taskTitle, triggerAt)
         } else {
-            NativeAlarmHelper.cancelAlarmsForTask(this, taskId)
+            // Antes se cancelaban TODAS las alarmas de la tarea: una tarea
+            // semanal completada desde esta pantalla dejaba de sonar hasta
+            // abrir la app. Ahora solo se cancela todo si la tarea se detiene.
+            NativeAlarmHelper.cancelAlarmsForTask(this, taskId, onlySnooze = !stopsOnComplete)
             NativeAlarmHelper.storePendingAction(this, "completed", taskId, weekday, taskTitle, System.currentTimeMillis())
         }
         finish()
@@ -508,7 +535,13 @@ class AlarmActivity : AppCompatActivity() {
         return "${year}_${month}_${day}"
     }
 
+    @Deprecated("Se mantiene para bloquear el botón atrás en todas las versiones")
+    @Suppress("MissingSuperCall")
     override fun onBackPressed() {
-    // No permitir cerrar con botón atrás
+        // No permitir cerrar con botón atrás: hay que Completar o Posponer.
+    }
+
+    companion object {
+        private const val AUTO_SILENCE_MS = 10L * 60 * 1000
     }
 }

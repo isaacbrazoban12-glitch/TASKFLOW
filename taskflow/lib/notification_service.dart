@@ -266,6 +266,7 @@ class NotificationService {
           title: task.title,
           weekday: weekday,
           repeats: task.repeats,
+          stopsOnComplete: task.stopsOnComplete,
           triggerAt: scheduledDate,
         );
       } catch (e) {
@@ -280,6 +281,7 @@ class NotificationService {
     required String title,
     required int weekday,
     required bool repeats,
+    bool stopsOnComplete = false,
     required tz.TZDateTime triggerAt,
   }) async {
     if (!isAndroid) return;
@@ -290,6 +292,7 @@ class NotificationService {
         'title': title,
         'weekday': weekday,
         'repeats': repeats,
+        'stopsOnComplete': stopsOnComplete,
         'triggerAt': triggerAt.millisecondsSinceEpoch,
       });
       debugPrint('[NotificationService] Overlay de alarma $alarmId programado');
@@ -417,6 +420,7 @@ class NotificationService {
         title: task.title,
         weekday: weekday,
         repeats: false,
+        stopsOnComplete: task.stopsOnComplete,
         triggerAt: snoozeDate,
       );
       await setSnoozeDeadline(task.id!, untilMillis: triggerAtMillis);
@@ -474,6 +478,9 @@ class NotificationService {
 
   Future<DateTime?> snoozeDeadline(int taskId) async {
     final prefs = await SharedPreferences.getInstance();
+    // Kotlin (AlarmActivity) escribe esta marca directamente: sin reload la
+    // caché de Dart no la ve mientras la app sigue en memoria.
+    await prefs.reload();
     final ms = prefs.getInt(_snoozeKey(taskId));
     if (ms == null) return null;
     final deadline = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
@@ -503,6 +510,9 @@ class NotificationService {
   Future<List<Map<String, dynamic>>> consumePendingAlarmActions() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Las acciones las guarda Kotlin: sin reload, con la app en memoria,
+      // completar/posponer desde la pantalla nativa no llegaba nunca a Dart.
+      await prefs.reload();
       final raw = prefs.getString('taskflow_pending_actions');
       if (raw == null) return [];
       await prefs.remove('taskflow_pending_actions');
@@ -593,13 +603,24 @@ class NotificationService {
       throw ArgumentError('weekday debe estar entre 1 y 7, se recibió: $weekday');
     }
 
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    return nextInstanceOfWeekdayTime(tz.TZDateTime.now(tz.local), weekday, hour, minute);
+  }
 
-    while (scheduled.weekday != weekday || scheduled.isBefore(now)) {
-      scheduled = scheduled.add(const Duration(days: 1));
+  /// Próxima fecha (estrictamente futura) con ese día y hora local.
+  /// Se construye cada candidato por fecha de calendario en lugar de sumar
+  /// `Duration(days: 1)` (24 h exactas), que con cambio de horario (DST)
+  /// corría la alarma una hora.
+  @visibleForTesting
+  static tz.TZDateTime nextInstanceOfWeekdayTime(
+      tz.TZDateTime now, int weekday, int hour, int minute) {
+    for (int offset = 0; offset <= 7; offset++) {
+      final candidate = tz.TZDateTime(
+          now.location, now.year, now.month, now.day + offset, hour, minute);
+      if (candidate.weekday == weekday && candidate.isAfter(now)) {
+        return candidate;
+      }
     }
-
-    return scheduled;
+    return tz.TZDateTime(
+        now.location, now.year, now.month, now.day + 7, hour, minute);
   }
 }
