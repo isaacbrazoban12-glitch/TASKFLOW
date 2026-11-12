@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
@@ -17,7 +18,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
+import android.os.VibrationAttributes
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
@@ -39,8 +42,12 @@ class AlarmActivity : AppCompatActivity() {
     private var weekday: Int = 1
     private var taskTitle: String = "Tarea"
     private var alarmId: Int = 0
+    private var stopsOnComplete: Boolean = false
+    private var crescendo: Runnable? = null
+    private val autoSilence = Runnable { stopAlarmSoundAndVibration() }
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var vibrationKeeper: Runnable? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeTicker: Runnable? = null
     private val animHandler = Handler(Looper.getMainLooper())
@@ -50,6 +57,9 @@ class AlarmActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Los botones físicos de volumen controlan el volumen de ALARMA
+        // mientras suena (antes movían otro canal y "no hacían nada").
+        volumeControlStream = AudioManager.STREAM_ALARM
 
         setupWindowFlags()
 
@@ -59,6 +69,7 @@ class AlarmActivity : AppCompatActivity() {
         weekday = intent.getIntExtra(MainActivity.EXTRA_WEEKDAY, 1)
         taskTitle = intent.getStringExtra(MainActivity.EXTRA_TITLE) ?: "Tarea"
         alarmId = intent.getIntExtra(MainActivity.EXTRA_ALARM_ID, 0)
+        stopsOnComplete = intent.getBooleanExtra(MainActivity.EXTRA_STOPS_ON_COMPLETE, false)
 
         val tvTime = findViewById<TextView>(R.id.tvTime)
         val tvTaskTitle = findViewById<TextView>(R.id.tvTaskTitle)
@@ -99,13 +110,34 @@ class AlarmActivity : AppCompatActivity() {
         }
 
         btnSnooze.setOnClickListener {
-            incrementSnoozeCount(taskId, weekday)
+            // El contador se incrementa una sola vez dentro de finishWithAction
+            // (antes se sumaba dos veces y solo se podía posponer 2 veces, no 3).
             finishWithAction("snoozed")
         }
 
         applyTheme(ThemeHelper.currentTheme(this))
         startAlarmSoundAndVibration()
         startAlarmAnimation()
+        // Como un despertador: si nadie responde, se silencia a los 10 minutos
+        // (la pantalla sigue visible) para no agotar la batería.
+        timeHandler.postDelayed(
+            autoSilence,
+            SoundHelper.autoSilenceMinutes(this) * 60_000L
+        )
+    }
+
+    /**
+     * Otra alarma dispara mientras esta suena (singleTop): se muestra la más
+     * reciente en lugar de ignorarla en silencio.
+     */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        stopAlarmAnimation()
+        stopAlarmSoundAndVibration()
+        timeHandler.removeCallbacks(autoSilence)
+        timeTicker?.let { timeHandler.removeCallbacks(it) }
+        recreate()
     }
 
     /**
@@ -374,39 +406,113 @@ class AlarmActivity : AppCompatActivity() {
 
     private fun startAlarmSoundAndVibration() {
         try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            if (uri != null) {
-                mediaPlayer = MediaPlayer().apply {
-                    setDataSource(this@AlarmActivity, uri)
-                    setAudioAttributes(
+            SoundHelper.ensureAudible(this)
+            // Sonido elegido para la tarea (o el predeterminado); si falla,
+            // createPlayer cae en la alarma del sistema.
+            val sound = SoundHelper.soundForTask(this, taskId)
+            mediaPlayer = SoundHelper.createPlayer(this, sound)?.also { player ->
+                if (SoundHelper.crescendoEnabled(this)) {
+                    startCrescendo(player)
+                } else {
+                    player.setVolume(1f, 1f)
+                }
+                player.start()
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
+        }
+        if (!SoundHelper.vibrateEnabled(this)) return
+        vibrator = obtainVibrator()
+        startVibration()
+        // Vigilante: algunos sistemas (HyperOS/MIUI, ahorro de energía, al
+        // encender la pantalla) cortan la vibración aunque sea en bucle.
+        // Se vuelve a lanzar cada pocos segundos mientras suene la alarma.
+        vibrationKeeper = object : Runnable {
+            override fun run() {
+                if (vibrator == null) return
+                startVibration()
+                timeHandler.postDelayed(this, VIBRATION_REFRESH_MS)
+            }
+        }
+        timeHandler.postDelayed(vibrationKeeper!!, VIBRATION_REFRESH_MS)
+    }
+
+    private fun obtainVibrator(): Vibrator? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    } catch (e: Exception) {
+        Log.e("AlarmActivity", "Sin vibrador: $e")
+        null
+    }
+
+    /**
+     * Vibración continua (900 ms sí / 400 ms no, sin fin) marcada como
+     * ALARMA: así el sistema la respeta en modo silencio y no la corta como
+     * una vibración normal de app.
+     */
+    private fun startVibration() {
+        val v = vibrator ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val timings = longArrayOf(0, 900, 400)
+                val effect = if (v.hasAmplitudeControl()) {
+                    VibrationEffect.createWaveform(timings, intArrayOf(0, 255, 0), 1)
+                } else {
+                    VibrationEffect.createWaveform(timings, 1)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+                } else {
+                    @Suppress("DEPRECATION")
+                    v.vibrate(
+                        effect,
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_ALARM)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build()
                     )
-                    isLooping = true
-                    prepare()
-                    start()
                 }
-            }
-        } catch (e: Exception) {
-            Log.e("AlarmActivity", "No se pudo reproducir sonido: $e")
-        }
-        try {
-            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500, 1000), 0))
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(longArrayOf(0, 1000, 500, 1000), 0)
+                v.vibrate(longArrayOf(0, 900, 400), 1)
             }
         } catch (e: Exception) {
             Log.e("AlarmActivity", "No se pudo vibrar: $e")
         }
     }
 
+    /**
+     * Subida gradual: empieza al 10 % y llega al 100 % en 30 segundos.
+     * Es volumen relativo del reproductor; los botones físicos siguen
+     * controlando el volumen de alarma del sistema.
+     */
+    private fun startCrescendo(player: MediaPlayer) {
+        val steps = 30
+        var step = 0
+        player.setVolume(0.1f, 0.1f)
+        crescendo = object : Runnable {
+            override fun run() {
+                if (mediaPlayer !== player) return
+                step++
+                val v = (0.1f + 0.9f * step / steps).coerceAtMost(1f)
+                try {
+                    player.setVolume(v, v)
+                } catch (_: Exception) {
+                    return
+                }
+                if (step < steps) timeHandler.postDelayed(this, 1000)
+            }
+        }
+        timeHandler.postDelayed(crescendo!!, 1000)
+    }
+
     private fun stopAlarmSoundAndVibration() {
+        crescendo?.let { timeHandler.removeCallbacks(it) }
+        crescendo = null
         try {
             mediaPlayer?.stop()
         } catch (_: Exception) {
@@ -416,11 +522,18 @@ class AlarmActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
         mediaPlayer = null
+        vibrationKeeper?.let { timeHandler.removeCallbacks(it) }
+        vibrationKeeper = null
+        val v = vibrator
+        vibrator = null
         try {
-            vibrator?.cancel()
+            v?.cancel()
         } catch (_: Exception) {
         }
-        vibrator = null
+    }
+
+    companion object {
+        private const val VIBRATION_REFRESH_MS = 8_000L
     }
 
     override fun onStop() {
@@ -432,6 +545,7 @@ class AlarmActivity : AppCompatActivity() {
         stopAlarmAnimation()
         timeTicker?.let { timeHandler.removeCallbacks(it) }
         timeTicker = null
+        timeHandler.removeCallbacks(autoSilence)
         stopAlarmSoundAndVibration()
         super.onDestroy()
     }
@@ -472,30 +586,36 @@ class AlarmActivity : AppCompatActivity() {
         if (action == "snoozed") {
             incrementSnoozeCount(taskId, weekday)
             val triggerAt = System.currentTimeMillis() + 5L * 60 * 1000
-            val snoozeId = taskId * 10 + weekday + 100000
-            NativeAlarmHelper.scheduleAlarm(this, snoozeId, taskTitle, taskId, weekday, false, triggerAt)
+            val snoozeId = taskId * 10 + weekday + NativeAlarmHelper.SNOOZE_OFFSET
+            NativeAlarmHelper.scheduleAlarm(
+                this, snoozeId, taskTitle, taskId, weekday, false, triggerAt, stopsOnComplete
+            )
             // Marca para que Dart no toque nada aunque tarde en arrancar.
             getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                 .edit().putLong("flutter.snooze_deadline_$taskId", triggerAt).apply()
             NativeAlarmHelper.storePendingAction(this, "snoozed", taskId, weekday, taskTitle, triggerAt)
         } else {
-            NativeAlarmHelper.cancelAlarmsForTask(this, taskId)
+            // Antes se cancelaban TODAS las alarmas de la tarea: una tarea
+            // semanal completada desde esta pantalla dejaba de sonar hasta
+            // abrir la app. Ahora solo se cancela todo si la tarea se detiene.
+            NativeAlarmHelper.cancelAlarmsForTask(this, taskId, onlySnooze = !stopsOnComplete)
             NativeAlarmHelper.storePendingAction(this, "completed", taskId, weekday, taskTitle, System.currentTimeMillis())
         }
         finish()
     }
 
+    // Dart guarda los enteros como Long en Android: getInt() lanzaría
+    // ClassCastException si el contador lo escribió el diálogo de Dart.
     private fun getSnoozeCount(taskId: Int, weekday: Int): Int {
-        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val key = "flutter.alarm_dismiss_${taskId}_${weekday}_${getCurrentYearMonthDay()}"
-        return prefs.getInt(key, 0)
+        return SoundHelper.readInt(this, key, 0)
     }
 
     private fun incrementSnoozeCount(taskId: Int, weekday: Int) {
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val key = "flutter.alarm_dismiss_${taskId}_${weekday}_${getCurrentYearMonthDay()}"
-        val current = prefs.getInt(key, 0)
-        prefs.edit().putInt(key, current + 1).apply()
+        val current = SoundHelper.readInt(this, key, 0)
+        prefs.edit().putLong(key, (current + 1).toLong()).apply()
     }
 
     private fun getCurrentYearMonthDay(): String {
@@ -508,7 +628,10 @@ class AlarmActivity : AppCompatActivity() {
         return "${year}_${month}_${day}"
     }
 
+    @Deprecated("Se mantiene para bloquear el botón atrás en todas las versiones")
+    @Suppress("MissingSuperCall")
     override fun onBackPressed() {
-    // No permitir cerrar con botón atrás
+        // No permitir cerrar con botón atrás: hay que Completar o Posponer.
     }
+
 }

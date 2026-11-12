@@ -38,6 +38,23 @@ class FakeDatabaseHelper extends DatabaseHelper {
     return 1;
   }
 
+  final List<Completion> completions = [];
+
+  @override
+  Future<void> logCompletion(Task task, int at) async {
+    completions.add(Completion(
+      taskId: task.id ?? -1,
+      title: task.title,
+      at: DateTime.fromMillisecondsSinceEpoch(at),
+    ));
+  }
+
+  @override
+  Future<List<Completion>> getCompletionsSince(int sinceMs) async => completions
+      .where((c) => c.at.millisecondsSinceEpoch >= sinceMs)
+      .toList()
+    ..sort((a, b) => b.at.compareTo(a.at));
+
   @override
   Future<Database> get database => throw UnimplementedError('Fake sin BD real');
 }

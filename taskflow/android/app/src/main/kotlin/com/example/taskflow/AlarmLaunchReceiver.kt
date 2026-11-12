@@ -14,13 +14,14 @@ class AlarmLaunchReceiver : BroadcastReceiver() {
         val alarmId = intent.getIntExtra(MainActivity.EXTRA_ALARM_ID, 0)
         val repeats = intent.getBooleanExtra(MainActivity.EXTRA_REPEATS, false)
         val triggerAt = intent.getLongExtra(MainActivity.EXTRA_TRIGGER_AT, System.currentTimeMillis())
+        val stopsOnComplete = intent.getBooleanExtra(MainActivity.EXTRA_STOPS_ON_COMPLETE, false)
 
-        Log.d("AlarmLaunchReceiver", "Disparado alarmId=$alarmId tarea=$title repeats=$repeats")
+        Log.d("AlarmLaunchReceiver", "Disparado alarmId=$alarmId tarea=$taskId repeats=$repeats")
 
         // Re-arme semanal antes de lanzar la actividad: setAlarmClock es one-shot.
         // Si repite, agenda +7 días (y actualiza el persistido); si no, lo elimina.
         val next = NativeAlarmHelper.rescheduleNextWeek(
-            context, alarmId, title, taskId, weekday, repeats, triggerAt
+            context, alarmId, title, taskId, weekday, repeats, triggerAt, stopsOnComplete
         )
         if (next != null) {
             Log.d("AlarmLaunchReceiver", "Reprogramada alarma $alarmId en $next")
@@ -29,23 +30,28 @@ class AlarmLaunchReceiver : BroadcastReceiver() {
         }
 
         val wakeLock = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "taskflow::alarm")
-        wakeLock.acquire(30000)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "taskflow::alarm")
+        wakeLock.acquire(10_000)
 
         val launch = Intent(context, AlarmActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_ALARM_ID, alarmId)
             putExtra(MainActivity.EXTRA_TITLE, title)
             putExtra(MainActivity.EXTRA_TASK_ID, taskId)
             putExtra(MainActivity.EXTRA_WEEKDAY, weekday)
+            putExtra(MainActivity.EXTRA_STOPS_ON_COMPLETE, stopsOnComplete)
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
             )
         }
-        Log.d("AlarmLaunchReceiver", "Lanzando AlarmActivity")
-        context.startActivity(launch)
-
-        if (wakeLock.isHeld) wakeLock.release()
+        try {
+            context.startActivity(launch)
+        } catch (e: Exception) {
+            // Si Android bloquea el arranque, queda la notificación de respaldo.
+            Log.e("AlarmLaunchReceiver", "No se pudo lanzar AlarmActivity: $e")
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
+        }
     }
 }

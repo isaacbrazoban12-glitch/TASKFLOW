@@ -12,7 +12,9 @@ import 'notification_service.dart';
 import 'theme_controller.dart';
 import 'widgets/alarm_dialog.dart';
 import 'widgets/entrance.dart';
+import 'sound_service.dart';
 import 'widgets/home_header.dart';
+import 'widgets/root_shell.dart';
 import 'widgets/theme_decorations.dart';
 import 'widgets/vivo_clock.dart';
 import 'widgets/settings_page.dart';
@@ -70,7 +72,9 @@ class _TaskFlowAppState extends State<TaskFlowApp> {
           theme: appThemeOf(widget.themeController.current).data,
           home: AppThemeScope(
             theme: appThemeOf(widget.themeController.current),
-            child: HomePage(themeController: widget.themeController),
+            child: RootShell(
+              home: HomePage(themeController: widget.themeController),
+            ),
           ),
         );
       },
@@ -101,6 +105,7 @@ class _HomePageState extends State<HomePage>
   Timer? _deleteTimer;
   bool _firstLoadDone = false;
   bool _animationsPaused = false;
+  bool _applyingPending = false;
   int? _justAddedId;
 
   @override
@@ -116,6 +121,14 @@ class _HomePageState extends State<HomePage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _deleteTimer?.cancel();
+    // Un borrado pendiente (barra Deshacer) se confirma igualmente.
+    final pending = _pendingDelete;
+    _pendingDelete = null;
+    if (pending?.id != null) {
+      _db.deleteTask(pending!.id!);
+      NotificationService.instance.cancelTask(pending.id!);
+      SoundService.instance.removeTaskSound(pending.id!);
+    }
     super.dispose();
   }
 
@@ -151,6 +164,8 @@ class _HomePageState extends State<HomePage>
       final tasks = await _db.getTasks();
       for (final task in tasks) {
         if (task.id == null) continue;
+        // La alarma nativa lee el sonido de la tarea desde preferencias.
+        await SoundService.instance.syncTaskSound(task.id!, task.sound);
         // Solo las detenidas (no se repiten o con stopOnComplete) pierden sus
         // alarmas. Una repetitiva sin stop completada solo marcó la ocurrencia
         // (completedAt) y sus futuras alarmas siguen activas.
@@ -331,7 +346,9 @@ class _HomePageState extends State<HomePage>
           FilledButton(
             onPressed: () async {
               Navigator.pop(context);
-              await NotificationService.instance.checkPermissions();
+              // Antes llamaba a checkPermissions (solo consulta, sin diálogo)
+              // y el botón no hacía nada.
+              await NotificationService.instance.requestPermissions();
             },
             child: const Text('Otorgar permiso'),
           ),
@@ -447,6 +464,15 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _applyCompletion(Task task, bool completed) async {
+    if (completed) {
+      // Historial para la sección Progreso. Un fallo aquí no debe impedir
+      // completar la tarea.
+      try {
+        await _db.logCompletion(task, DateTime.now().millisecondsSinceEpoch);
+      } catch (e) {
+        debugPrint('[HomePage] No se pudo guardar el historial: $e');
+      }
+    }
     // Repetitiva sin stopOnComplete: completar solo marca la ocurrencia actual
     // (fecha) y las alarmas futuras siguen activas.
     if (completed && !task.stopsOnComplete) {
@@ -493,6 +519,9 @@ class _HomePageState extends State<HomePage>
   /// Aplica en Dart las acciones que AlarmActivity ya aplicó en nativo.
   /// Un snooze vencido se ignora (ya sonó; la marca se autolimpia al leerla).
   Future<void> _applyPendingAlarmActions() async {
+    // Arranque y reanudar pueden llamarla a la vez: una sola en curso.
+    if (_applyingPending) return;
+    _applyingPending = true;
     try {
       final pending = await NotificationService.instance.consumePendingAlarmActions();
       if (pending.isEmpty) return;
@@ -514,16 +543,22 @@ class _HomePageState extends State<HomePage>
       }
     } catch (e) {
       debugPrint('[HomePage] Error aplicando acciones pendientes: $e');
+    } finally {
+      _applyingPending = false;
     }
   }
 
   Future<void> _loadTasks() async {
-    setState(() => _isLoading = true);
+    if (!mounted) return;
+    // _isLoading empieza en true: el indicador solo sale en la primera carga.
+    // Recargar tras completar o editar ya no hace parpadear toda la pantalla.
     try {
       final tasks = await _db.getTasks();
       if (!mounted) return;
+      final hiddenId = _pendingDelete?.id;
       setState(() {
-        _tasks = tasks;
+        // Una tarea en "Deshacer" no debe reaparecer al recargar la lista.
+        _tasks = tasks.where((t) => hiddenId == null || t.id != hiddenId).toList();
         _isLoading = false;
       });
       // La entrada en cascada solo corre en la primera carga.
@@ -542,9 +577,10 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _openTaskDialog({Task? task}) async {
-    final result = await showDialog<Task>(
-      context: context,
-      builder: (_) => TaskFormDialog(task: task),
+    final result = await showTaskForm(
+      context,
+      theme: AppThemeScope.of(context),
+      task: task,
     );
     if (result != null) {
       if (task == null && result.id != null) {
@@ -595,6 +631,7 @@ class _HomePageState extends State<HomePage>
     try {
       await _db.deleteTask(task.id!);
       await NotificationService.instance.cancelTask(task.id!);
+      await SoundService.instance.removeTaskSound(task.id!);
     } catch (e) {
       debugPrint('[HomePage] Error al eliminar tarea: $e');
     }

@@ -280,3 +280,18 @@ No issues found!
   es ruido (BUG-04), no fallo. El caso de json roto loguea además el
   `FormatException` esperado del catch.
   loguea además el `FormatException` esperado del catch.
+
+## Revisión 2026-11-07
+
+Arreglado en esta revisión (`flutter analyze` sin issues, `flutter test` 54/54, APK debug compila):
+
+- **BUG-02 (arreglado)**: `MainActivity.onNewIntent` guarda el payload en `launchPayload` si Dart no responde o no hay motor, en vez de perderlo.
+- **BUG-03 (arreglado)**: `onNewIntent` llama a `setIntent(intent)`.
+- **BUG-10 | alta**: completar una tarea semanal desde `AlarmActivity` cancelaba *todas* sus alarmas nativas; dejaba de sonar hasta abrir la app. Ahora solo se cancela la posposición, salvo si la tarea se detiene al completar (`stopsOnComplete` viaja de Dart a Kotlin y se persiste).
+- **BUG-11 | media**: posponer desde `AlarmActivity` sumaba el contador dos veces (solo 2 posposiciones en vez de 3).
+- **BUG-12 | alta**: `consumePendingAlarmActions` y `snoozeDeadline` leían la caché de `SharedPreferences` sin `reload()`; con la app en memoria no veían lo escrito por Kotlin.
+- **BUG-13 | media**: cambio de horario (DST) corría las alarmas una hora (Dart sumaba `Duration(days: 1)`, Kotlin `+7*24h`). Ahora por fecha de calendario.
+- **BUG-14 | media (privacidad)**: `MainActivity` se mostraba sobre la pantalla de bloqueo siempre; ahora solo cuando la abre una notificación de alarma.
+- **BUG-15 | media**: el botón «Otorgar permiso» solo consultaba el permiso (no lo pedía).
+- **BUG-16 | baja**: una tarea en «Deshacer» reaparecía al recargar la lista; borrado pendiente perdido al cerrar la pantalla; doble toque en Guardar creaba dos tareas; título sin límite de longitud.
+- **BUG-17 | baja**: segunda alarma simultánea ignorada por `AlarmActivity` (singleTop sin `onNewIntent`); la alarma sonaba sin fin (ahora se silencia a los 10 min); título de tarea en logcat.

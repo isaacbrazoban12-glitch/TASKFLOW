@@ -18,16 +18,24 @@ object NativeAlarmHelper {
     private const val KEY_PREFIX = "alarm_"
     private const val FLUTTER_PREFS = "FlutterSharedPreferences"
     private const val PENDING_KEY = "flutter.taskflow_pending_actions"
+    const val SNOOZE_OFFSET = 100000
+    private const val MAX_TITLE = 120
 
     fun scheduleAlarm(
         context: Context,
         alarmId: Int,
-        title: String,
+        rawTitle: String,
         taskId: Int,
         weekday: Int,
         repeats: Boolean,
-        triggerAtMillis: Long
+        triggerAtMillis: Long,
+        stopsOnComplete: Boolean = false
     ) {
+        if (triggerAtMillis <= 0L) {
+            Log.w("NativeAlarmHelper", "triggerAt inválido para alarma $alarmId, ignorada")
+            return
+        }
+        val title = rawTitle.take(MAX_TITLE)
         val intent = Intent(context, AlarmLaunchReceiver::class.java).apply {
             putExtra(MainActivity.EXTRA_ALARM_ID, alarmId)
             putExtra(MainActivity.EXTRA_TITLE, title)
@@ -35,6 +43,7 @@ object NativeAlarmHelper {
             putExtra(MainActivity.EXTRA_WEEKDAY, weekday)
             putExtra(MainActivity.EXTRA_REPEATS, repeats)
             putExtra(MainActivity.EXTRA_TRIGGER_AT, triggerAtMillis)
+            putExtra(MainActivity.EXTRA_STOPS_ON_COMPLETE, stopsOnComplete)
         }
         val pending = PendingIntent.getBroadcast(
             context,
@@ -55,7 +64,7 @@ object NativeAlarmHelper {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pending)
             }
         }
-        persistAlarm(context, alarmId, title, taskId, weekday, repeats, triggerAtMillis)
+        persistAlarm(context, alarmId, title, taskId, weekday, repeats, triggerAtMillis, stopsOnComplete)
     }
 
     fun cancelAlarm(context: Context, alarmId: Int) {
@@ -112,6 +121,7 @@ object NativeAlarmHelper {
                 val weekday = json.getInt("weekday")
                 val repeats = json.getBoolean("repeats")
                 val triggerAt = json.getLong("triggerAt")
+                val stopsOnComplete = json.optBoolean("stopsOnComplete", false)
 
                 val nextTrigger = if (repeats) {
                     nextWeekdayTime(weekday, triggerAt, now)
@@ -119,7 +129,7 @@ object NativeAlarmHelper {
                     if (triggerAt > now) triggerAt else -1L
                 }
                 if (nextTrigger > 0) {
-                    scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, nextTrigger)
+                    scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, nextTrigger, stopsOnComplete)
                     Log.d("NativeAlarmHelper", "Restaurada alarma $alarmId en $nextTrigger")
                 } else {
                     removeAlarm(context, alarmId)
@@ -161,7 +171,8 @@ object NativeAlarmHelper {
         taskId: Int,
         weekday: Int,
         repeats: Boolean,
-        triggerAtMillis: Long
+        triggerAtMillis: Long,
+        stopsOnComplete: Boolean
     ) {
         val json = JSONObject().apply {
             put("alarmId", alarmId)
@@ -170,6 +181,7 @@ object NativeAlarmHelper {
             put("weekday", weekday)
             put("repeats", repeats)
             put("triggerAt", triggerAtMillis)
+            put("stopsOnComplete", stopsOnComplete)
         }.toString()
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -190,23 +202,30 @@ object NativeAlarmHelper {
         taskId: Int,
         weekday: Int,
         repeats: Boolean,
-        lastTriggerAtMillis: Long
+        lastTriggerAtMillis: Long,
+        stopsOnComplete: Boolean = false
     ): Long? {
         if (!repeats) {
             removeAlarm(context, alarmId)
             return null
         }
-        var next = lastTriggerAtMillis + 7L * 24 * 3600 * 1000
+        // Calendar suma 7 días de calendario conservando la hora local: con un
+        // cambio de horario (DST) la alarma ya no se corre una hora.
+        val cal = Calendar.getInstance().apply { timeInMillis = lastTriggerAtMillis }
         val now = System.currentTimeMillis()
-        while (next <= now) {
-            next += 7L * 24 * 3600 * 1000
-        }
-        scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, next)
+        do {
+            cal.add(Calendar.DAY_OF_YEAR, 7)
+        } while (cal.timeInMillis <= now)
+        val next = cal.timeInMillis
+        scheduleAlarm(context, alarmId, title, taskId, weekday, repeats, next, stopsOnComplete)
         return next
     }
 
-    /** Cancela todas las alarmas nativas persistidas de la tarea (incluye snooze). */
-    fun cancelAlarmsForTask(context: Context, taskId: Int) {
+    /**
+     * Cancela las alarmas nativas persistidas de la tarea. Con [onlySnooze]
+     * solo las de posposición (ids >= [SNOOZE_OFFSET]) y conserva las semanales.
+     */
+    fun cancelAlarmsForTask(context: Context, taskId: Int, onlySnooze: Boolean = false) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val editor = prefs.edit()
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -217,6 +236,7 @@ object NativeAlarmHelper {
                 val json = JSONObject(jsonStr)
                 if (json.getInt("taskId") != taskId) continue
                 val alarmId = json.getInt("alarmId")
+                if (onlySnooze && alarmId < SNOOZE_OFFSET) continue
                 val intent = Intent(context, AlarmLaunchReceiver::class.java)
                 val pending = PendingIntent.getBroadcast(
                     context,
